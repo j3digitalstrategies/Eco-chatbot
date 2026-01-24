@@ -8,7 +8,7 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# Silence the telemetry errors seen in your logs
+# Disable telemetry to stop the log spam
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -25,18 +25,8 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# This block is likely where the TypeError was triggered. 
-# I've ensured it's clean and correctly terminated.
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: #f0f7f4;
-    }
-    .stChatMessage {
-        border-radius: 15px;
-    }
-    </style>
-    """, unsafe_allow_headers=True)
+# Using a single-line string to bypass the Streamlit TypeError on line 30
+st.markdown('<style>.stApp {background-color: #f0f7f4;} .stChatMessage {border-radius: 15px;}</style>', unsafe_allow_headers=True)
 
 # --- 2. DATABASE RECOVERY ---
 @st.cache_resource
@@ -65,7 +55,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Using PersistentClient to handle the local files specifically
+        # Connect to ChromaDB using the PersistentClient to resolve the KeyError: '_type'
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -101,7 +91,6 @@ st.title("🌱 Eco-Chatbot")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts Section
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -117,7 +106,6 @@ for m in st.session_state.messages:
 
 query = st.chat_input("Ask about the curriculum...")
 
-# Handle suggested prompt click or text input
 final_query = query or st.session_state.get("pending_prompt")
 if "pending_prompt" in st.session_state:
     del st.session_state["pending_prompt"]
