@@ -52,7 +52,7 @@ def setup_rag_chain():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, streaming=True) 
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    # 1. Contextualize Question
+    # Contextualize Question
     context_prompt = ChatPromptTemplate.from_messages([
         ("system", "Given a chat history and a user question, formulate a standalone question."),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -61,9 +61,9 @@ def setup_rag_chain():
     
     history_aware_retriever = create_history_aware_retriever(llm, retriever, context_prompt)
     
-    # 2. Answer Question
+    # Answer Question
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Answer using the context:\n\n{{context}}"),
+        ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Use the context to answer accurately:\n\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -71,27 +71,40 @@ def setup_rag_chain():
     document_chain = create_stuff_documents_chain(llm, qa_prompt)
     return create_retrieval_chain(history_aware_retriever, document_chain)
 
-# --- 5. UI LAYOUT ---
+# --- 5. UI LAYOUT & BRANDING ---
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
 
-# Initialize simplified history
+# Use simple dictionaries for state to prevent the '_type' error
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 6. CHAT LOGIC ---
-# Display messages using Streamlit's chat_message
+# --- 6. SUGGESTED PROMPTS ---
+suggested_prompts = ["What is Eco-Education?", "Tell me about the garden", "Ann's teaching philosophy"]
+
+# --- 7. DISPLAY HISTORY ---
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-user_input = st.chat_input("Ask a question about the curriculum...")
+# --- 8. INPUT LOGIC (Suggestions + Chat Input) ---
+if not st.session_state.messages:
+    st.markdown("### Suggested Topics")
+    cols = st.columns(len(suggested_prompts))
+    for i, prompt in enumerate(suggested_prompts):
+        if cols[i].button(prompt):
+            st.session_state.pending_input = prompt
 
+user_input = st.chat_input("Ask about nature or education...")
+
+if "pending_input" in st.session_state:
+    user_input = st.session_state.pop("pending_input")
+
+# --- 9. PROCESSING & STREAMING ---
 if user_input:
-    # Display user message
     st.chat_message("user").markdown(user_input)
     
-    # Convert session history to LangChain format for the model
+    # Convert simple state back to LangChain objects for the AI
     chat_history = []
     for m in st.session_state.messages:
         if m["role"] == "user":
@@ -102,23 +115,20 @@ if user_input:
     with st.chat_message("assistant"):
         try:
             rag_chain = setup_rag_chain()
-            response_placeholder = st.empty()
-            full_response = ""
+            res_box = st.empty()
+            full_res = ""
             
-            # Streaming the response
-            for chunk in rag_chain.stream({
-                "input": user_input,
-                "chat_history": chat_history
-            }):
+            for chunk in rag_chain.stream({"input": user_input, "chat_history": chat_history}):
                 if "answer" in chunk:
-                    full_response += chunk["answer"]
-                    response_placeholder.markdown(full_response + "▌")
+                    full_res += chunk["answer"]
+                    res_box.markdown(full_res + "▌")
             
-            response_placeholder.markdown(full_response)
+            res_box.markdown(full_res)
             
-            # Save to session state
+            # Save and Refresh
             st.session_state.messages.append({"role": "user", "content": user_input})
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            st.session_state.messages.append({"role": "assistant", "content": full_res})
+            st.rerun()
             
         except Exception as e:
             st.error(f"Error: {e}")
