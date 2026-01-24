@@ -18,36 +18,35 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. CONFIG ---
 load_dotenv()
-CHROMA_PATH = "chroma_db_final_v1" # New folder name to force a clean build
+CHROMA_PATH = "chroma_db_final"
 ZIP_PATH = "chroma_db.zip"
 
-st.set_page_config(page_title="Eco-Chatbot")
+st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# --- 2. DATABASE EXTRACTION ---
+# --- 2. DATABASE EXTRACTION (Targeting your specific zip structure) ---
 @st.cache_resource
 def prepare_db():
     if not os.path.exists(CHROMA_PATH):
         if not os.path.exists(ZIP_PATH):
-            return "Missing zip"
+            return "Error: chroma_db.zip not found in GitHub root."
         try:
             if os.path.exists("temp_extract"):
                 shutil.rmtree("temp_extract")
+            
             with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                 zip_ref.extractall("temp_extract")
             
-            found_path = None
-            for root, dirs, files in os.walk("temp_extract"):
-                if "chroma.sqlite3" in files:
-                    found_path = root
-                    break
+            # Based on your file: the data is in 'temp_extract/chroma_db/'
+            source_inner_folder = os.path.join("temp_extract", "chroma_db")
             
-            if found_path:
-                shutil.copytree(found_path, CHROMA_PATH)
+            if os.path.exists(source_inner_folder):
+                shutil.copytree(source_inner_folder, CHROMA_PATH)
                 shutil.rmtree("temp_extract", ignore_errors=True)
                 return "Success"
-            return "No sqlite found"
+            else:
+                return "Error: Could not find 'chroma_db' folder inside zip."
         except Exception as e:
-            return str(e)
+            return f"Extraction Error: {e}"
     return "Success"
 
 db_status = prepare_db()
@@ -59,10 +58,14 @@ def get_rag_chain(_api_key):
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
         client = chromadb.PersistentClient(path=CHROMA_PATH)
-        vectorstore = Chroma(client=client, collection_name="langchain", embedding_function=embeddings)
+        vectorstore = Chroma(
+            client=client, 
+            collection_name="langchain", 
+            embedding_function=embeddings
+        )
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for Eco-Education. Context: {context}"),
+            ("system", "You are an assistant for Eco-Education. Use the context to answer: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -80,42 +83,42 @@ st.write("Curriculum Assistant by Ann Lewin-Benham")
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
-    st.error("API Key missing in Secrets!")
+    st.error("Missing OpenAI API Key in Streamlit Secrets.")
+    st.stop()
+
+if db_status != "Success":
+    st.error(db_status)
     st.stop()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# SUGGESTED PROMPT BUTTONS
+# SUGGESTED PROMPT BUTTONS (Standard Styling)
 st.write("### Suggested Questions")
-col1, col2, col3 = st.columns(3)
-if col1.button("What is the waste module?"):
-    st.session_state.btn_query = "What is the waste module?"
-if col2.button("Tell me about recycling"):
-    st.session_state.btn_query = "Tell me about recycling"
-if col3.button("Eco-friendly tips"):
-    st.session_state.btn_query = "Give me some eco-friendly tips"
+c1, c2, c3 = st.columns(3)
+if c1.button("What is the waste module?"):
+    st.session_state.btn_input = "What is the waste module?"
+if c2.button("Tell me about recycling"):
+    st.session_state.btn_input = "Tell me about recycling"
+if c3.button("Eco-friendly tips"):
+    st.session_state.btn_input = "Give me some eco-friendly tips"
 
-# Display history
+# History Display
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
 # --- 5. CHAT LOGIC ---
-user_input = st.chat_input("Ask a question...")
-final_query = None
-
-if user_input:
-    final_query = user_input
-elif "btn_query" in st.session_state:
-    final_query = st.session_state.btn_query
-    del st.session_state.btn_query
+user_query = st.chat_input("Ask about the eco-curriculum...")
+final_query = user_query if user_query else st.session_state.get("btn_input")
 
 if final_query:
+    if "btn_input" in st.session_state: del st.session_state["btn_input"]
+    
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"):
         st.markdown(final_query)
-        
+
     chain = get_rag_chain(api_key)
     if chain:
         with st.chat_message("assistant"):
@@ -123,7 +126,7 @@ if final_query:
                 HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                 for m in st.session_state.messages[:-1]
             ]
-            with st.spinner("Searching..."):
+            with st.spinner("Analyzing curriculum..."):
                 try:
                     res = chain.invoke({"input": final_query, "chat_history": history})
                     st.markdown(res["answer"])
