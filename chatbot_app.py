@@ -18,45 +18,43 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. CONFIG ---
 load_dotenv()
-CHROMA_PATH = "chroma_db_final_v2" 
+CHROMA_PATH = "chroma_db_v3_stable"  # New name to force a fresh start
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# --- 2. DATABASE EXTRACTION (Aggressive Fix) ---
+# --- 2. DATABASE EXTRACTION ---
 @st.cache_resource
 def prepare_db():
+    # If the folder doesn't exist, we must build it from the zip
     if not os.path.exists(CHROMA_PATH):
         if not os.path.exists(ZIP_PATH):
-            return f"Error: {ZIP_PATH} not found in repository root."
+            return f"❌ {ZIP_PATH} not found in GitHub repository root."
         
         try:
-            # Clean up old attempts
-            if os.path.exists("temp_extract"):
-                shutil.rmtree("temp_extract")
+            # Temporary extraction spot
+            temp_dir = "temp_unzip"
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
             
-            # Open and extract
             with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall("temp_extract")
+                zip_ref.extractall(temp_dir)
             
-            # Based on your zip structure: the sqlite3 is in temp_extract/chroma_db/
-            source_folder = os.path.join("temp_extract", "chroma_db")
+            # Look for the folder that contains 'chroma.sqlite3'
+            found_db_dir = None
+            for root, dirs, files in os.walk(temp_dir):
+                if "chroma.sqlite3" in files:
+                    found_db_dir = root
+                    break
             
-            if os.path.exists(source_folder):
-                shutil.copytree(source_folder, CHROMA_PATH)
-                shutil.rmtree("temp_extract", ignore_errors=True)
+            if found_db_dir:
+                shutil.copytree(found_db_dir, CHROMA_PATH)
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return "Success"
             else:
-                # Fallback: search for chroma.sqlite3 anywhere in the zip
-                for root, dirs, files in os.walk("temp_extract"):
-                    if "chroma.sqlite3" in files:
-                        shutil.copytree(root, CHROMA_PATH)
-                        return "Success"
-                return "Error: Could not find chroma.sqlite3 folder inside zip."
-        except zipfile.BadZipFile:
-            return "Error: The file 'chroma_db.zip' on GitHub is corrupted or not a valid zip."
+                return "❌ Database files missing inside the zip."
         except Exception as e:
-            return f"Extraction Error: {str(e)}"
+            return f"❌ Extraction Error: {str(e)}"
     return "Success"
 
 db_status = prepare_db()
@@ -75,7 +73,7 @@ def get_rag_chain(_api_key):
         )
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for Eco-Education. Context: {context}"),
+            ("system", "You are an assistant for Eco-Education. Use the provided context to answer questions about the curriculum. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -84,7 +82,7 @@ def get_rag_chain(_api_key):
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Engine Load Error: {e}")
+        st.error(f"Engine Error: {e}")
         return None
 
 # --- 4. UI ---
@@ -94,7 +92,7 @@ st.write("Curriculum Assistant by Ann Lewin-Benham")
 api_key = st.secrets.get("OPENAI_API_KEY")
 
 if db_status != "Success":
-    st.error(f"Database Issue: {db_status}")
+    st.error(db_status)
     st.stop()
 
 if not api_key:
@@ -108,26 +106,27 @@ if "messages" not in st.session_state:
 st.write("### Suggested Questions")
 cols = st.columns(3)
 if cols[0].button("What is the waste module?"):
-    st.session_state.prompt_queue = "What is the waste module?"
+    st.session_state.queued_prompt = "What is the waste module?"
 if cols[1].button("Tell me about recycling"):
-    st.session_state.prompt_queue = "Tell me about recycling"
+    st.session_state.queued_prompt = "Tell me about recycling"
 if cols[2].button("Eco-friendly tips"):
-    st.session_state.prompt_queue = "Give me some eco-friendly tips"
+    st.session_state.queued_prompt = "Give me some eco-friendly tips"
 
-# Display chat history
+# Display history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. CHAT ACTION ---
-user_input = st.chat_input("Ask a question...")
+# --- 5. CHAT LOGIC ---
+user_input = st.chat_input("Ask a question about the curriculum...")
 
+# Handle button click or typing
 final_query = None
 if user_input:
     final_query = user_input
-elif "prompt_queue" in st.session_state:
-    final_query = st.session_state.prompt_queue
-    del st.session_state.prompt_queue
+elif "queued_prompt" in st.session_state:
+    final_query = st.session_state.queued_prompt
+    del st.session_state.queued_prompt
 
 if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
@@ -142,7 +141,7 @@ if final_query:
                 for m in st.session_state.messages[:-1]
             ]
             try:
-                with st.spinner("Searching Curriculum..."):
+                with st.spinner("Searching Eco-Curriculum..."):
                     response = chain.invoke({"input": final_query, "chat_history": history})
                     st.markdown(response["answer"])
                     st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
