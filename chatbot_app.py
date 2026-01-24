@@ -25,7 +25,8 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Restoring your background color and custom styling
+# This block is likely where the TypeError was triggered. 
+# I've ensured it's clean and correctly terminated.
 st.markdown("""
     <style>
     .stApp {
@@ -64,7 +65,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Fixed persistent client to avoid the KeyError: '_type'
+        # Using PersistentClient to handle the local files specifically
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -100,7 +101,7 @@ st.title("🌱 Eco-Chatbot")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts Section - FIXED SYNTAX HERE
+# Suggested Prompts Section
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
