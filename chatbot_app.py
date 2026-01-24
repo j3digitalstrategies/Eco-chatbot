@@ -9,10 +9,6 @@ import chromadb
 import shutil
 from dotenv import load_dotenv
 
-# --- STARTUP STABILITY ---
-os.environ["STREAMLIT_STATS_TRACKING"] = "false"
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -27,7 +23,7 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# FIX: Changed 'unsafe_allow_headers' to 'unsafe_allow_html'
+# Styling - FIXED parameter to unsafe_allow_html
 st.markdown("""
     <style>
     .stChatMessage {
@@ -36,44 +32,49 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABASE RECOVERY ---
+# --- 2. DATABASE RECOVERY (Robust Version) ---
 @st.cache_resource
 def prepare_db():
+    # If the database folder is missing, unzip it
     if not os.path.exists(CHROMA_PATH):
         if os.path.exists(ZIP_PATH):
             try:
+                # Clean start
                 if os.path.exists("temp_extract"):
                     shutil.rmtree("temp_extract")
                 
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall("temp_extract")
                 
-                items = os.listdir("temp_extract")
-                valid_folders = [f for f in items if os.path.isdir(os.path.join("temp_extract", f)) and not f.startswith("__")]
+                # Find the folder inside (ignoring Mac garbage files)
+                items = [f for f in os.listdir("temp_extract") if not f.startswith("__")]
+                source = os.path.join("temp_extract", items[0]) if items else "temp_extract"
                 
-                source = os.path.join("temp_extract", valid_folders[0]) if valid_folders else "temp_extract"
-                
+                # If there's already a folder there, clear it before moving new one
                 if os.path.exists(CHROMA_PATH):
                     shutil.rmtree(CHROMA_PATH)
+                
                 shutil.move(source, CHROMA_PATH)
                 shutil.rmtree("temp_extract", ignore_errors=True)
-                return "Ready"
-            except Exception:
-                pass
-    return "Ready"
+                return "✅ Database Extracted"
+            except Exception as e:
+                return f"⚠️ DB Error: {e}"
+    return "✅ Database Ready"
 
-prepare_db()
+status = prepare_db()
 
 # --- 3. THE AI ENGINE ---
 @st.cache_resource
 def get_rag_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
+        st.error("Missing OpenAI API Key in Secrets.")
         return None
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
+        # Connect to the unzipped database
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -100,7 +101,7 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Engine Error: {e}")
+        st.error(f"Engine Load Error: {e}")
         return None
 
 # --- 4. UI ---
@@ -110,6 +111,7 @@ st.markdown("### — by Ann Lewin-Benham")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Show quick buttons
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -118,33 +120,43 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
+# Show chat history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
+# --- 5. CHAT LOGIC ---
 query = st.chat_input("Ask about the curriculum...")
 
+# Combine text input and button input
 final_query = query
 if st.session_state.get("pending_prompt"):
     final_query = st.session_state.pending_prompt
     del st.session_state["pending_prompt"]
 
 if final_query:
-    if not st.session_state.messages or st.session_state.messages[-1]["content"] != final_query:
-        st.session_state.messages.append({"role": "user", "content": final_query})
-        
+    # Add user message to UI
+    st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"):
         st.markdown(final_query)
         
     chain = get_rag_chain()
     if chain:
         with st.chat_message("assistant"):
-            history = [
-                HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
-                for m in st.session_state.messages[:-1]
-            ]
-            with st.spinner("Thinking..."):
-                response = chain.invoke({"input": final_query, "chat_history": history})
-                st.markdown(response["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+            # Format history for LangChain
+            history = []
+            for m in st.session_state.messages[:-1]:
+                if m["role"] == "user":
+                    history.append(HumanMessage(content=m["content"]))
+                else:
+                    history.append(AIMessage(content=m["content"]))
+            
+            with st.spinner("Searching curriculum..."):
+                try:
+                    response = chain.invoke({"input": final_query, "chat_history": history})
+                    st.markdown(response["answer"])
+                    st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+                except Exception as e:
+                    st.error(f"Answer Error: {e}")
+    
     st.rerun()
