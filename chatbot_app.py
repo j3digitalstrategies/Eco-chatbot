@@ -25,7 +25,7 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Restoring your background color and custom styling
+# Keeping your requested background color and custom styling
 st.markdown("""
     <style>
     .stApp {
@@ -64,11 +64,11 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # The FIX: Using PersistentClient prevents the KeyError: '_type'
-        # by explicitly managing the connection to the local files.
-        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        # THE FIX: Using PersistentClient directly solves the KeyError: '_type'
+        # which is caused by a version mismatch in the automatic library discovery.
+        persistent_client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
-            client=client,
+            client=persistent_client,
             collection_name="langchain",
             embedding_function=embeddings,
         )
@@ -92,7 +92,7 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Connection Error: {e}")
+        st.error(f"Vectorstore Error: {e}")
         return None
 
 # --- 4. UI & SUGGESTED PROMPTS ---
@@ -117,9 +117,10 @@ for m in st.session_state.messages:
 
 query = st.chat_input("Ask about the curriculum...")
 
-# Handle suggested prompt click or text input
-final_query = query or st.session_state.get("pending_prompt")
-if "pending_prompt" in st.session_state:
+# Logic to handle both text input and button clicks
+final_query = query
+if st.session_state.get("pending_prompt"):
+    final_query = st.session_state.pending_prompt
     del st.session_state["pending_prompt"]
 
 if final_query:
