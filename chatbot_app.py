@@ -8,7 +8,7 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# Disable the broken telemetry to clean up your logs
+# Disable the broken telemetry to keep logs clean
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -41,21 +41,22 @@ def prepare_db():
 
 db_status = prepare_db()
 
-# --- 3. THE AI ENGINE (Direct Client Fix) ---
+# --- 3. THE AI ENGINE (Fixing the KeyError: '_type') ---
 @st.cache_resource
-def get_chatbot_chain():
+def get_rag_chain():
+    # Attempt to get API key from Streamlit Secrets or .env
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        st.error("Missing OpenAI API Key in Streamlit Secrets.")
+        st.error("Missing OpenAI API Key. Please add it to Streamlit Secrets.")
         return None
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # We use PersistentClient to bypass the version-mismatch bug (KeyError: '_type')
+        # We use PersistentClient to bypass version-mismatch bugs
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         
-        # 'langchain' is the default collection name used in your builder script
+        # 'langchain' is the default collection name used by LangChain's Chroma wrapper
         vectorstore = Chroma(
             client=client,
             collection_name="langchain",
@@ -66,8 +67,8 @@ def get_chatbot_chain():
         
         system_prompt = (
             "You are a helpful assistant specialized in Eco-Education curriculum. "
-            "Use the provided context to answer questions. "
-            "If you can't find the answer in the context, say you don't know.\n\n"
+            "Use the provided context to answer questions accurately. "
+            "If the answer isn't in the context, politely say you don't know.\n\n"
             "{context}"
         )
         
@@ -88,49 +89,35 @@ def get_chatbot_chain():
 
 # --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
-st.caption(db_status)
+st.caption(f"Status: {db_status}")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Chat History
+# Display history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. SUGGESTED PROMPTS ---
-if not st.session_state.messages:
-    prompts = [
-        "What are the core principles of Eco-Education?",
-        "How does the garden serve as a classroom?",
-        "Describe the approach to documentation."
-    ]
-    cols = st.columns(3)
-    for i, p in enumerate(prompts):
-        if cols[i].button(p):
-            st.session_state.pending_input = p
-
-# --- 6. CHAT LOGIC ---
-query = st.chat_input("Ask a question about the curriculum...")
-if "pending_input" in st.session_state:
-    query = st.session_state.pop("pending_input")
+# --- 5. INTERACTION ---
+query = st.chat_input("Ask about the curriculum...")
 
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
         
-    chain = get_chatbot_chain()
+    chain = get_rag_chain()
     if chain:
         with st.chat_message("assistant"):
             try:
-                # Build conversation history
+                # Format history for LangChain
                 history = [
                     HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                     for m in st.session_state.messages[:-1]
                 ]
                 
-                with st.spinner("Searching records..."):
+                with st.spinner("Analyzing curriculum..."):
                     response = chain.invoke({"input": query, "chat_history": history})
                     st.markdown(response["answer"])
                     st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
