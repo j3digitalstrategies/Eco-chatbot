@@ -19,137 +19,130 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. SETTINGS ---
 load_dotenv()
-# Using a specific folder for production to avoid locking/permission issues
-DB_DIR = "db_production_final"
-CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
+# Unique folder to force a fresh, clean start
+DB_FOLDER = "db_production_v11"
+CHROMA_PATH = os.path.join(os.getcwd(), DB_FOLDER)
 ZIP_NAME = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# --- 2. AUTOMATIC DATABASE SETUP ---
+# --- 2. DATABASE RECOVERY ENGINE ---
 @st.cache_resource
-def setup_database():
+def initialize_system():
     try:
-        # Check if DB is already extracted and valid
         if os.path.exists(CHROMA_PATH) and os.path.exists(os.path.join(CHROMA_PATH, "chroma.sqlite3")):
-            return True, "Database Ready"
+            return True, "System Ready"
 
         if not os.path.exists(ZIP_NAME):
-            return False, f"Error: '{ZIP_NAME}' not found in the root directory."
+            return False, f"File {ZIP_NAME} not found."
 
-        # Extraction logic
-        with zipfile.ZipFile(ZIP_NAME, 'r') as zip_ref:
-            # Extract to a temporary folder first
-            temp_extract = "temp_db_extract"
-            if os.path.exists(temp_extract): shutil.rmtree(temp_extract)
-            zip_ref.extractall(temp_extract)
-            
-            # Find the actual directory containing chroma.sqlite3
-            sqlite_path = None
-            for root, dirs, files in os.walk(temp_extract):
-                if "chroma.sqlite3" in files:
-                    sqlite_path = root
-                    break
-            
-            if not sqlite_path:
-                return False, "Could not find 'chroma.sqlite3' inside the zip."
+        # Extract
+        temp_dir = "temp_extract"
+        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+        with zipfile.ZipFile(ZIP_NAME, 'r') as z:
+            z.extractall(temp_dir)
 
-            # Move files to final production path
-            if os.path.exists(CHROMA_PATH): shutil.rmtree(CHROMA_PATH)
-            shutil.copytree(sqlite_path, CHROMA_PATH)
-            shutil.rmtree(temp_extract)
-            
-        return True, "Database initialized successfully."
+        # Find the db file
+        sqlite_file = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
+        if not sqlite_file:
+            return False, "chroma.sqlite3 not found in zip."
+
+        # Move to production path
+        if os.path.exists(CHROMA_PATH): shutil.rmtree(CHROMA_PATH)
+        shutil.copytree(sqlite_file.parent, CHROMA_PATH)
+        shutil.rmtree(temp_dir)
+        
+        return True, "Success"
     except Exception as e:
-        return False, f"Setup failed: {str(e)}"
+        return False, str(e)
 
-# Run setup once
-db_ready, db_status = setup_database()
+ready, status = initialize_system()
 
-# --- 3. UI LAYOUT ---
-st.title("🌱 Eco-Education Curriculum Assistant")
-st.caption("AI-powered insights into Ann Lewin-Benham's curriculum.")
+# --- 3. UI ---
+st.title("🌱 Eco-Chatbot")
+st.write("Curriculum Assistant by Ann Lewin-Benham")
 
-if not db_ready:
-    st.error(db_status)
+if not ready:
+    st.error(f"Startup Error: {status}")
     st.stop()
 
 api_key = st.secrets.get("OPENAI_API_KEY")
-if not api_key:
-    st.error("Please set the OPENAI_API_KEY in Streamlit Secrets.")
-    st.stop()
 
-# --- 4. AI ENGINE ---
+# --- 4. AI BRAIN (With Version Fix) ---
 @st.cache_resource
-def get_retrieval_chain(_api_key):
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
-    
-    # Connect to the extracted database
-    vectorstore = Chroma(
-        persist_directory=CHROMA_PATH,
-        embedding_function=embeddings,
-        collection_name="langchain"
-    )
-    
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
-    
-    system_prompt = (
-        "You are an expert assistant for the Eco-Education curriculum. "
-        "Use the provided context to answer questions accurately. "
-        "If the answer is not in the context, say you don't know.\n\n"
-        "Context: {context}"
-    )
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ])
-    
-    combine_docs_chain = create_stuff_documents_chain(llm, prompt)
-    return create_retrieval_chain(vectorstore.as_retriever(search_kwargs={"k": 5}), combine_docs_chain)
+def get_chain(_key):
+    try:
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_key)
+        
+        # Connect with Settings to bypass versioning KeyErrors
+        client = chromadb.PersistentClient(
+            path=CHROMA_PATH,
+            settings=chromadb.Settings(allow_reset=True, anonymized_telemetry=False)
+        )
+        
+        vectorstore = Chroma(
+            client=client, 
+            collection_name="langchain", 
+            embedding_function=embeddings
+        )
+        
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_key)
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an assistant for the Eco-Education curriculum. Use the context to answer. Context: {context}"),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+        ])
+        
+        return create_retrieval_chain(
+            vectorstore.as_retriever(search_kwargs={"k": 3}),
+            create_stuff_documents_chain(llm, prompt)
+        )
+    except Exception as e:
+        st.error(f"AI Error: {e}")
+        return None
 
-# Initialize Chat Session
+# Session State
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 5. INTERACTIVE CHAT ---
-# Display history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# Quick Question Buttons
-st.sidebar.title("Suggested Topics")
-quick_queries = [
+# --- 5. INTERFACE & BUTTONS ---
+st.write("### Suggested Questions")
+cols = st.columns(3)
+btns = [
     "What is the focus of the Waste module?",
-    "Explain the approach to Recycling.",
-    "What activities are suggested for Biodiversity?"
+    "Tell me about the Recycling approach.",
+    "Give me some eco-friendly tips."
 ]
 
-for q in quick_queries:
-    if st.sidebar.button(q):
-        st.session_state.pending_query = q
+for i, text in enumerate(btns):
+    if cols[i].button(text):
+        st.session_state.next_msg = text
+
+# Display chat
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
 # Handle Input
-user_input = st.chat_input("Ask a question...")
-if st.session_state.get("pending_query"):
-    user_input = st.session_state.pop("pending_query")
+prompt = st.chat_input("Ask about the curriculum...")
+final_prompt = prompt if prompt else st.session_state.get("next_msg")
 
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+if final_prompt:
+    if "next_msg" in st.session_state: del st.session_state.next_msg
+    
+    st.session_state.messages.append({"role": "user", "content": final_prompt})
+    with st.chat_message("user"): st.markdown(final_prompt)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Searching curriculum..."):
-            chain = get_retrieval_chain(api_key)
+    chain = get_chain(api_key)
+    if chain:
+        with st.chat_message("assistant"):
             history = [
                 HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                 for m in st.session_state.messages[:-1]
             ]
-            
-            result = chain.invoke({"input": user_input, "chat_history": history})
-            response = result["answer"]
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            with st.spinner("Thinking..."):
+                res = chain.invoke({"input": final_prompt, "chat_history": history})
+                st.markdown(res["answer"])
+                st.session_state.messages.append({"role": "assistant", "content": res["answer"]})
+    st.rerun()
