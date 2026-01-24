@@ -46,16 +46,16 @@ db_status = prepare_db()
 def get_chatbot_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        st.error("Missing OpenAI API Key.")
+        st.error("Missing OpenAI API Key in Streamlit Secrets.")
         return None
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Using the PersistentClient bypasses the version migration bug (KeyError: '_type')
+        # We use PersistentClient to bypass the version-mismatch bug (KeyError: '_type')
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         
-        # We target the 'langchain' collection which is the default for your builder script
+        # 'langchain' is the default collection name used in your builder script
         vectorstore = Chroma(
             client=client,
             collection_name="langchain",
@@ -65,9 +65,9 @@ def get_chatbot_chain():
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
         
         system_prompt = (
-            "You are a helpful assistant specialized in Eco-Education. "
+            "You are a helpful assistant specialized in Eco-Education curriculum. "
             "Use the provided context to answer questions. "
-            "If you can't find the answer, state that clearly.\n\n"
+            "If you can't find the answer in the context, say you don't know.\n\n"
             "{context}"
         )
         
@@ -83,7 +83,7 @@ def get_chatbot_chain():
         )
         return chain
     except Exception as e:
-        st.error(f"Database Error: {e}")
+        st.error(f"Database Connection Error: {e}")
         return None
 
 # --- 4. UI ---
@@ -93,7 +93,7 @@ st.caption(db_status)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display history
+# Display Chat History
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
@@ -111,12 +111,11 @@ if not st.session_state.messages:
             st.session_state.pending_input = p
 
 # --- 6. CHAT LOGIC ---
-query = st.chat_input("Ask a question...")
+query = st.chat_input("Ask a question about the curriculum...")
 if "pending_input" in st.session_state:
     query = st.session_state.pop("pending_input")
 
 if query:
-    # Add user message
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -125,18 +124,17 @@ if query:
     if chain:
         with st.chat_message("assistant"):
             try:
-                # Convert history for LangChain
+                # Build conversation history
                 history = [
                     HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                     for m in st.session_state.messages[:-1]
                 ]
                 
-                with st.spinner("Analyzing documents..."):
+                with st.spinner("Searching records..."):
                     response = chain.invoke({"input": query, "chat_history": history})
                     st.markdown(response["answer"])
                     st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
             except Exception as e:
-                st.error(f"Error generating response: {e}")
+                st.error(f"Response Error: {e}")
 
-    # Use st.rerun() to ensure the chat history displays correctly
     st.rerun()
