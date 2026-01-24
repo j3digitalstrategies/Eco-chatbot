@@ -52,8 +52,11 @@ def prepare_db():
             with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                 zip_ref.extractall("temp_extract")
                 # Look for the actual data folder inside the zip
-                extracted_folders = [f for f in os.listdir("temp_extract") if os.path.isdir(os.path.join("temp_extract", f))]
-                source = os.path.join("temp_extract", extracted_folders[0]) if extracted_folders else "temp_extract"
+                items = os.listdir("temp_extract")
+                # Filter out hidden files like __MACOSX
+                valid_folders = [f for f in items if os.path.isdir(os.path.join("temp_extract", f)) and not f.startswith("__")]
+                
+                source = os.path.join("temp_extract", valid_folders[0]) if valid_folders else "temp_extract"
                 shutil.move(source, CHROMA_PATH)
                 shutil.rmtree("temp_extract", ignore_errors=True)
             return "✅ Fresh Database Loaded"
