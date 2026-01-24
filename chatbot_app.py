@@ -19,8 +19,8 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. SETTINGS ---
 load_dotenv()
-# We use a versioned folder name to ensure a fresh start on deployment
-DB_DIR = "db_v26_fixed"
+# Using a unique folder name to force a clean extraction on this deploy
+DB_DIR = "db_verified_eco_v1"
 CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
 ZIP_NAME = "chroma_db.zip"
 
@@ -30,68 +30,67 @@ st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 @st.cache_resource
 def prepare_database():
     try:
-        # Check if already extracted
+        # Check if database already exists in the persistent path
         if os.path.exists(CHROMA_PATH) and os.path.exists(os.path.join(CHROMA_PATH, "chroma.sqlite3")):
-            return True, "Database Ready"
+            return True, "Database Online"
 
         if not os.path.exists(ZIP_NAME):
-            return False, f"Error: {ZIP_NAME} not found in repository root."
+            return False, f"Missing {ZIP_NAME} in repository."
 
-        # Safety check for Git LFS pointer files
+        # Verify the file isn't a Git LFS pointer
         if os.path.getsize(ZIP_NAME) < 10000:
-            return False, "CORRUPT FILE: The zip file on GitHub is a 'link' (LFS). ACTION: Delete it on GitHub and re-upload by dragging the file directly into your browser."
+            return False, "The zip file is a Git LFS pointer. Please re-upload the actual file to GitHub."
 
-        # Extraction Logic
-        temp_extract = "temp_extract_dir"
-        if os.path.exists(temp_extract): shutil.rmtree(temp_extract)
+        # Clean extraction logic
+        temp_dir = "temp_unzip"
+        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
         
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
-            z.extractall(temp_extract)
+            z.extractall(temp_dir)
 
-        # Locate the actual database folder inside the zip
-        sqlite_file = next(Path(temp_extract).rglob("chroma.sqlite3"), None)
-        if not sqlite_file:
-            return False, "Internal Error: chroma.sqlite3 not found inside the zip archive."
+        # Look for the sqlite file regardless of nested folder structure
+        sqlite_loc = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
+        if not sqlite_loc:
+            return False, "Could not find chroma.sqlite3 inside the zip."
 
         if os.path.exists(CHROMA_PATH): shutil.rmtree(CHROMA_PATH)
-        shutil.copytree(sqlite_file.parent, CHROMA_PATH)
-        shutil.rmtree(temp_extract)
+        shutil.copytree(sqlite_loc.parent, CHROMA_PATH)
+        shutil.rmtree(temp_dir)
         
-        return True, "Database Successfully Extracted"
+        return True, "Initialization Success"
     except Exception as e:
-        return False, f"Setup Error: {str(e)}"
+        return False, f"Setup Error: {e}"
 
-# --- 3. UI HEADER ---
-st.title("🌱 Eco-Chatbot")
-st.write("Curriculum Assistant by Ann Lewin-Benham")
+# --- 3. UI LAYOUT ---
+st.title("🌱 Eco-Education Curriculum Assistant")
+st.caption("Knowledge base: Ann Lewin-Benham's Curriculum")
 
-db_ok, db_status = prepare_database()
+ready, status = prepare_database()
 
-if not db_ok:
-    st.error(db_status)
-    st.info("After fixing the file, remember to 'Reboot App' in the Streamlit menu.")
+if not ready:
+    st.error(status)
     st.stop()
 
-# --- 4. AI ENGINE (Fixed for KeyError: '_type') ---
+# --- 4. RETRIEVAL ENGINE ---
 @st.cache_resource
-def get_retrieval_chain(_api_key):
+def get_retrieval_chain(_key):
     try:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_key)
         
-        # FIX: We initialize the PersistentClient DIRECTLY. 
-        # This bypasses the schema validation that causes the KeyError.
+        # FIX: Directly using PersistentClient avoids the KeyError: '_type'
+        # This matches the 'langchain' collection name used in your ingest code
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         
         vectorstore = Chroma(
             client=client,
-            collection_name="langchain", # Default name from your ingest code
+            collection_name="langchain",
             embedding_function=embeddings
         )
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_key)
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for the Eco-Education curriculum. Answer ONLY based on the context. Context: {context}"),
+            ("system", "You are a helpful assistant for the Eco-Education curriculum. Use the provided context to answer questions. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -101,37 +100,41 @@ def get_retrieval_chain(_api_key):
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"AI Engine Failure: {e}")
+        st.error(f"Engine Failure: {e}")
         return None
 
 # --- 5. CHAT INTERFACE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Question Buttons (Horizontal Layout)
+# Suggested Topics
 st.write("### Suggested Topics")
 c1, c2, c3 = st.columns(3)
-if c1.button("What is the focus of the Waste module?", use_container_width=True):
-    st.session_state.pending_query = "What is the focus of the Waste module?"
-if c2.button("Tell me about the Recycling approach.", use_container_width=True):
-    st.session_state.pending_query = "Tell me about the Recycling approach."
-if c3.button("Give me some eco-friendly tips.", use_container_width=True):
-    st.session_state.pending_query = "Give me some eco-friendly tips."
+suggestions = [
+    "What is the focus of the Waste module?",
+    "Tell me about the Recycling approach.",
+    "Give me some eco-friendly tips."
+]
 
-# Display chat history
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+if c1.button(suggestions[0], use_container_width=True): st.session_state.trigger = suggestions[0]
+if c2.button(suggestions[1], use_container_width=True): st.session_state.trigger = suggestions[1]
+if c3.button(suggestions[2], use_container_width=True): st.session_state.trigger = suggestions[2]
 
-# Handle Inputs
-chat_input = st.chat_input("Ask a question about the curriculum...")
-query = chat_input if chat_input else st.session_state.get("pending_query")
+# Display history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-if query:
-    if "pending_query" in st.session_state: del st.session_state.pending_query
+# Input Handling
+user_query = st.chat_input("Ask a question about the curriculum...")
+final_query = user_query if user_query else st.session_state.get("trigger")
+
+if final_query:
+    if "trigger" in st.session_state: del st.session_state.trigger
     
-    st.session_state.messages.append({"role": "user", "content": query})
-    with st.chat_message("user"): st.markdown(query)
+    st.session_state.messages.append({"role": "user", "content": final_query})
+    with st.chat_message("user"):
+        st.markdown(final_query)
 
     api_key = st.secrets.get("OPENAI_API_KEY")
     chain = get_retrieval_chain(api_key)
@@ -142,8 +145,8 @@ if query:
                 HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                 for m in st.session_state.messages[:-1]
             ]
-            with st.spinner("Reviewing curriculum documents..."):
-                response = chain.invoke({"input": query, "chat_history": history})
+            with st.spinner("Searching the curriculum..."):
+                response = chain.invoke({"input": final_query, "chat_history": history})
                 st.markdown(response["answer"])
                 st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
     st.rerun()
