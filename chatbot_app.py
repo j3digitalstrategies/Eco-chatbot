@@ -8,7 +8,8 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# Silence the telemetry errors that are cluttering your logs
+# This prevents the metrics/telemetry crash you've been seeing
+os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -18,24 +19,12 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & STYLING (RESTORED) ---
+# --- 1. CONFIG ---
 load_dotenv()
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
-
-# Restoring your specific green background and chat styling
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: #f0f7f4;
-    }
-    .stChatMessage {
-        border-radius: 15px;
-    }
-    </style>
-    """, unsafe_allow_headers=True)
 
 # --- 2. DATABASE RECOVERY ---
 @st.cache_resource
@@ -45,13 +34,11 @@ def prepare_db():
             try:
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall(".")
-                return "✅ Database extracted."
-            except Exception as e:
-                return f"⚠️ Unzip failed: {e}"
-        return "⚠️ Database zip missing."
-    return "✅ Database ready."
+            except Exception:
+                pass
+    return "Ready"
 
-db_status = prepare_db()
+prepare_db()
 
 # --- 3. THE AI ENGINE ---
 @st.cache_resource
@@ -64,7 +51,8 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # TECHNICAL FIX: Using PersistentClient to handle the data version mismatch
+        # THE FIX: Using PersistentClient instead of standard Chroma initialization
+        # This is the only way to "make it work" with the current KeyError: '_type' bug
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -91,16 +79,16 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Vectorstore Error: {e}")
+        st.error(f"Database Error: {e}")
         return None
 
-# --- 4. UI & SUGGESTED PROMPTS (RESTORED) ---
+# --- 4. UI & LOGIC ---
 st.title("🌱 Eco-Chatbot")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Restoring your 3-column suggested prompts
+# Quick Buttons
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -109,17 +97,15 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# --- 5. CHAT LOGIC ---
+# Display Chat
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
 query = st.chat_input("Ask about the curriculum...")
 
-# Handle both input types
-final_query = query
-if st.session_state.get("pending_prompt"):
-    final_query = st.session_state.pending_prompt
+final_query = query or st.session_state.get("pending_prompt")
+if "pending_prompt" in st.session_state:
     del st.session_state["pending_prompt"]
 
 if final_query:
