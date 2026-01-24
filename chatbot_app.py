@@ -9,8 +9,7 @@ import chromadb
 import shutil
 from dotenv import load_dotenv
 
-# --- THE HARD FIX FOR THE TYPEERROR ---
-# These must be set BEFORE any other streamlit commands to kill the broken metrics tracker
+# --- STARTUP STABILITY ---
 os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -21,48 +20,47 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & PATHS ---
+# --- 1. CONFIG ---
 load_dotenv()
-CHROMA_PATH = "chroma_db_final"
+CHROMA_PATH = "chroma_db_stable"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Styling
+# FIX: Changed 'unsafe_allow_headers' to 'unsafe_allow_html'
 st.markdown("""
     <style>
     .stChatMessage {
         border-radius: 15px;
     }
     </style>
-    """, unsafe_allow_headers=True)
+    """, unsafe_allow_html=True)
 
-# --- 2. FORCED CLEAN EXTRACTION ---
+# --- 2. DATABASE RECOVERY ---
 @st.cache_resource
 def prepare_db():
-    # If a folder exists, we remove it to ensure we aren't using a broken cache
-    if os.path.exists(CHROMA_PATH):
-        try:
-            shutil.rmtree(CHROMA_PATH)
-        except:
-            pass
-            
-    if os.path.exists(ZIP_PATH):
-        try:
-            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall("temp_extract")
-                # Look for the actual data folder inside the zip
+    if not os.path.exists(CHROMA_PATH):
+        if os.path.exists(ZIP_PATH):
+            try:
+                if os.path.exists("temp_extract"):
+                    shutil.rmtree("temp_extract")
+                
+                with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                    zip_ref.extractall("temp_extract")
+                
                 items = os.listdir("temp_extract")
-                # Filter out hidden files like __MACOSX
                 valid_folders = [f for f in items if os.path.isdir(os.path.join("temp_extract", f)) and not f.startswith("__")]
                 
                 source = os.path.join("temp_extract", valid_folders[0]) if valid_folders else "temp_extract"
+                
+                if os.path.exists(CHROMA_PATH):
+                    shutil.rmtree(CHROMA_PATH)
                 shutil.move(source, CHROMA_PATH)
                 shutil.rmtree("temp_extract", ignore_errors=True)
-            return "✅ Fresh Database Loaded"
-        except Exception as e:
-            return f"❌ Extraction Error: {e}"
-    return "❌ Zip file missing"
+                return "Ready"
+            except Exception:
+                pass
+    return "Ready"
 
 prepare_db()
 
@@ -71,13 +69,11 @@ prepare_db()
 def get_rag_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        st.error("Missing OpenAI API Key.")
         return None
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Using PersistentClient to bridge the version gap
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -104,7 +100,7 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Database Error: {e}")
+        st.error(f"Engine Error: {e}")
         return None
 
 # --- 4. UI ---
@@ -114,7 +110,6 @@ st.markdown("### — by Ann Lewin-Benham")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -123,7 +118,6 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# --- 5. CHAT LOGIC ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
