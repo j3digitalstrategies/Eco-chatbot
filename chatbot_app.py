@@ -9,7 +9,8 @@ import chromadb
 import shutil
 from dotenv import load_dotenv
 
-# STOP THE GHOST ERRORS: Disables the broken telemetry that causes the line 30 crash
+# --- THE HARD FIX FOR THE TYPEERROR ---
+# These must be set BEFORE any other streamlit commands to kill the broken metrics tracker
 os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -20,10 +21,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG ---
+# --- 1. CONFIG & PATHS ---
 load_dotenv()
-# We use a new folder name to force Streamlit to ignore its broken cache
-CHROMA_PATH = "chroma_db_fresh"
+CHROMA_PATH = "chroma_db_final"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
@@ -37,26 +37,29 @@ st.markdown("""
     </style>
     """, unsafe_allow_headers=True)
 
-# --- 2. FORCED DATABASE EXTRACTION ---
+# --- 2. FORCED CLEAN EXTRACTION ---
 @st.cache_resource
 def prepare_db():
-    # If the fresh folder doesn't exist, unzip it immediately
-    if not os.path.exists(CHROMA_PATH):
-        if os.path.exists(ZIP_PATH):
-            try:
-                with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                    # Extract to a temp folder then rename to ensure it's clean
-                    zip_ref.extractall("temp_db")
-                    # Find the actual folder inside the zip (usually 'chroma_db')
-                    inner_folder = os.path.join("temp_db", "chroma_db")
-                    if os.path.exists(inner_folder):
-                        shutil.move(inner_folder, CHROMA_PATH)
-                    else:
-                        shutil.move("temp_db", CHROMA_PATH)
-                return "✅ Fresh DB Ready"
-            except Exception as e:
-                return f"⚠️ Error: {e}"
-    return "✅ Ready"
+    # If a folder exists, we remove it to ensure we aren't using a broken cache
+    if os.path.exists(CHROMA_PATH):
+        try:
+            shutil.rmtree(CHROMA_PATH)
+        except:
+            pass
+            
+    if os.path.exists(ZIP_PATH):
+        try:
+            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall("temp_extract")
+                # Look for the actual data folder inside the zip
+                extracted_folders = [f for f in os.listdir("temp_extract") if os.path.isdir(os.path.join("temp_extract", f))]
+                source = os.path.join("temp_extract", extracted_folders[0]) if extracted_folders else "temp_extract"
+                shutil.move(source, CHROMA_PATH)
+                shutil.rmtree("temp_extract", ignore_errors=True)
+            return "✅ Fresh Database Loaded"
+        except Exception as e:
+            return f"❌ Extraction Error: {e}"
+    return "❌ Zip file missing"
 
 prepare_db()
 
@@ -71,7 +74,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Using PersistentClient to solve the KeyError: '_type'
+        # Using PersistentClient to bridge the version gap
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
