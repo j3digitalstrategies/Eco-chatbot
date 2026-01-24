@@ -5,9 +5,10 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import zipfile
+import chromadb
 from dotenv import load_dotenv
 
-# Disable the broken telemetry
+# Disable the broken telemetry to clean up your logs
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -32,51 +33,58 @@ def prepare_db():
             try:
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall(".")
-                return "✅ Database ready."
+                return "✅ Database extracted."
             except Exception as e:
                 return f"⚠️ Unzip failed: {e}"
-        return "⚠️ No database found. Please upload chroma_db.zip."
+        return "⚠️ Database zip missing."
     return "✅ Database ready."
 
 db_status = prepare_db()
 
-# --- 3. THE AI ENGINE ---
+# --- 3. THE AI ENGINE (Direct Client Fix) ---
 @st.cache_resource
 def get_chatbot_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        st.error("Missing OpenAI API Key in Streamlit Secrets.")
+        st.error("Missing OpenAI API Key.")
         return None
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
-    # Fix: We specify the collection_name to avoid the migration/KeyError bug
-    vectorstore = Chroma(
-        persist_directory=CHROMA_PATH,
-        embedding_function=embeddings,
-        collection_name="langchain" # Standard default for LangChain-created DBs
-    )
-    
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
-    
-    system_prompt = (
-        "You are a helpful assistant for the Eco-Education curriculum. "
-        "Use the provided context to answer the user's questions. "
-        "If you don't know the answer, say you don't know.\n\n"
-        "{context}"
-    )
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ])
-    
-    chain = create_retrieval_chain(
-        vectorstore.as_retriever(search_kwargs={"k": 5}),
-        create_stuff_documents_chain(llm, prompt)
-    )
-    return chain
+    try:
+        # Using the PersistentClient bypasses the version migration bug (KeyError: '_type')
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        
+        # We target the 'langchain' collection which is the default for your builder script
+        vectorstore = Chroma(
+            client=client,
+            collection_name="langchain",
+            embedding_function=embeddings,
+        )
+        
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=api_key)
+        
+        system_prompt = (
+            "You are a helpful assistant specialized in Eco-Education. "
+            "Use the provided context to answer questions. "
+            "If you can't find the answer, state that clearly.\n\n"
+            "{context}"
+        )
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+        ])
+        
+        chain = create_retrieval_chain(
+            vectorstore.as_retriever(search_kwargs={"k": 5}),
+            create_stuff_documents_chain(llm, prompt)
+        )
+        return chain
+    except Exception as e:
+        st.error(f"Database Error: {e}")
+        return None
 
 # --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
@@ -85,6 +93,7 @@ st.caption(db_status)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Display history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
@@ -107,6 +116,7 @@ if "pending_input" in st.session_state:
     query = st.session_state.pop("pending_input")
 
 if query:
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -115,18 +125,18 @@ if query:
     if chain:
         with st.chat_message("assistant"):
             try:
-                # Build history
+                # Convert history for LangChain
                 history = [
                     HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                     for m in st.session_state.messages[:-1]
                 ]
                 
-                with st.spinner("Searching knowledge base..."):
+                with st.spinner("Analyzing documents..."):
                     response = chain.invoke({"input": query, "chat_history": history})
-                    answer = response["answer"]
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    st.markdown(response["answer"])
+                    st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
             except Exception as e:
-                st.error(f"Error processing question: {e}")
+                st.error(f"Error generating response: {e}")
 
+    # Use st.rerun() to ensure the chat history displays correctly
     st.rerun()
