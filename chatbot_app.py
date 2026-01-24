@@ -23,7 +23,7 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Styling
+# Styling - Fixed parameter
 st.markdown("""
     <style>
     .stChatMessage {
@@ -35,42 +35,48 @@ st.markdown("""
 # --- 2. DATABASE RECOVERY ---
 @st.cache_resource
 def prepare_db():
-    if not os.path.exists(CHROMA_PATH):
-        if os.path.exists(ZIP_PATH):
-            try:
+    try:
+        if not os.path.exists(CHROMA_PATH):
+            if os.path.exists(ZIP_PATH):
                 if os.path.exists("temp_extract"):
                     shutil.rmtree("temp_extract")
+                
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall("temp_extract")
                 
-                items = [f for f in os.listdir("temp_extract") if not f.startswith("__")]
-                source = os.path.join("temp_extract", items[0]) if items else "temp_extract"
+                # Look for the folder containing 'chroma.sqlite3'
+                db_root = None
+                for root, dirs, files in os.walk("temp_extract"):
+                    if "chroma.sqlite3" in files:
+                        db_root = root
+                        break
                 
-                if os.path.exists(CHROMA_PATH):
-                    shutil.rmtree(CHROMA_PATH)
-                shutil.move(source, CHROMA_PATH)
-                shutil.rmtree("temp_extract", ignore_errors=True)
-                return "✅ Database Ready"
-            except Exception as e:
-                return f"⚠️ DB Error: {e}"
-    return "✅ Ready"
+                if db_root:
+                    if os.path.exists(CHROMA_PATH):
+                        shutil.rmtree(CHROMA_PATH)
+                    shutil.move(db_root, CHROMA_PATH)
+                    shutil.rmtree("temp_extract", ignore_errors=True)
+                    return "✅ DB Loaded"
+                return "❌ Could not find chroma.sqlite3 in zip"
+            return "❌ zip file missing"
+        return "✅ Ready"
+    except Exception as e:
+        return f"❌ Error: {e}"
 
-prepare_db()
+db_status = prepare_db()
 
-# --- 3. THE AI ENGINE ---
+# --- 3. AI ENGINE ---
 @st.cache_resource
 def get_rag_chain():
-    # Check both Secrets and .env
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-    
     if not api_key:
-        st.error("🔑 API Key not found. Please check 'Secrets' in Streamlit Cloud.")
+        st.error("🔑 OpenAI API Key missing in Secrets!")
         return None
 
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-    
     try:
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
         client = chromadb.PersistentClient(path=CHROMA_PATH)
+        
         vectorstore = Chroma(
             client=client,
             collection_name="langchain",
@@ -103,10 +109,13 @@ def get_rag_chain():
 st.title("🌱 Eco-Chatbot")
 st.markdown("### — by Ann Lewin-Benham")
 
+# Debug status (subtle)
+if "❌" in db_status:
+    st.warning(db_status)
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Quick Buttons
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -115,12 +124,11 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# Display History
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. CHAT LOGIC ---
+# --- 5. LOGIC ---
 query = st.chat_input("Ask about the curriculum...")
 
 final_query = query
@@ -136,18 +144,16 @@ if final_query:
     chain = get_rag_chain()
     if chain:
         with st.chat_message("assistant"):
-            history = []
-            for m in st.session_state.messages[:-1]:
-                if m["role"] == "user":
-                    history.append(HumanMessage(content=m["content"]))
-                else:
-                    history.append(AIMessage(content=m["content"]))
-            
-            with st.spinner("Searching curriculum..."):
+            history = [
+                HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
+                for m in st.session_state.messages[:-1]
+            ]
+            with st.spinner("Searching..."):
                 try:
                     response = chain.invoke({"input": final_query, "chat_history": history})
-                    st.markdown(response["answer"])
-                    st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+                    ans = response["answer"]
+                    st.markdown(ans)
+                    st.session_state.messages.append({"role": "assistant", "content": ans})
                 except Exception as e:
-                    st.error(f"Response Error: {e}")
+                    st.error(f"Thinking Error: {e}")
     st.rerun()
