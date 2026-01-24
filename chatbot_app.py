@@ -6,10 +6,10 @@ import streamlit as st
 import os
 import zipfile
 import chromadb
+import shutil
 from dotenv import load_dotenv
 
-# These two lines are critical to stop the "decoy" error on the markdown line
-# by disabling the broken telemetry reporting in this Streamlit version.
+# STOP THE GHOST ERRORS: Disables the broken telemetry that causes the line 30 crash
 os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -20,14 +20,15 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & STYLING ---
+# --- 1. CONFIG ---
 load_dotenv()
-CHROMA_PATH = "chroma_db"
+# We use a new folder name to force Streamlit to ignore its broken cache
+CHROMA_PATH = "chroma_db_fresh"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# This is where the crash was reported. Telemetry disablement above fixes this.
+# Styling
 st.markdown("""
     <style>
     .stChatMessage {
@@ -36,17 +37,26 @@ st.markdown("""
     </style>
     """, unsafe_allow_headers=True)
 
-# --- 2. DATABASE RECOVERY ---
+# --- 2. FORCED DATABASE EXTRACTION ---
 @st.cache_resource
 def prepare_db():
+    # If the fresh folder doesn't exist, unzip it immediately
     if not os.path.exists(CHROMA_PATH):
         if os.path.exists(ZIP_PATH):
             try:
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                    zip_ref.extractall(".")
-            except Exception:
-                pass
-    return "Ready"
+                    # Extract to a temp folder then rename to ensure it's clean
+                    zip_ref.extractall("temp_db")
+                    # Find the actual folder inside the zip (usually 'chroma_db')
+                    inner_folder = os.path.join("temp_db", "chroma_db")
+                    if os.path.exists(inner_folder):
+                        shutil.move(inner_folder, CHROMA_PATH)
+                    else:
+                        shutil.move("temp_db", CHROMA_PATH)
+                return "✅ Fresh DB Ready"
+            except Exception as e:
+                return f"⚠️ Error: {e}"
+    return "✅ Ready"
 
 prepare_db()
 
@@ -61,8 +71,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # This PersistentClient setup is the ONLY way to fix the KeyError: '_type' 
-        # that is currently causing your "questions don't work" issue.
+        # Using PersistentClient to solve the KeyError: '_type'
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
