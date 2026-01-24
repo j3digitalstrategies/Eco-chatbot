@@ -8,7 +8,6 @@ import zipfile
 from dotenv import load_dotenv
 
 # --- 1. MANDATORY FIRST STREAMLIT COMMAND ---
-# This must remain at the very top to avoid the error you saw in the logs.
 st.set_page_config(page_title="Ann Lewin-Benham AI", layout="wide")
 
 # LangChain Imports
@@ -19,25 +18,24 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 2. THE UNZIPPER (Optimized) ---
+# --- 2. THE UNZIPPER ---
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
 @st.cache_resource
 def manage_database():
-    """Extracts the database if it doesn't exist and returns status."""
     if not os.path.exists(CHROMA_PATH) and os.path.exists(ZIP_PATH):
         try:
             with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                 zip_ref.extractall(".")
-            return "extracted"
+            return "ready"
         except Exception as e:
             return str(e)
     return "ready"
 
-db_status = manage_database()
+manage_database()
 
-# --- 3. CONFIGURATION & BRANDING ---
+# --- 3. CONFIGURATION ---
 if "OPENAI_API_KEY" in st.secrets:
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 else:
@@ -46,33 +44,33 @@ else:
 DOCUMENT_AUTHOR = "Ann Lewin-Benham" 
 DOCUMENT_TITLE = "Eco-Education for Young Children" 
 
-# --- 4. SAFETY FILTERS ---
-OFF_LIMITS = ["sex", "penis", "vagina", "sexual", "porn", "intercourse", "genitals"]
-REFUSAL_MESSAGE = "I am a specialized assistant for the Eco-Education curriculum. I don't provide information on that topic, but I can help you with questions about nature or Ann Lewin-Benham's methods."
-
-def is_strictly_inappropriate(query: str) -> bool:
-    query_clean = query.lower().replace("?", "").replace(".", "").split()
-    return any(word in OFF_LIMITS for word in query_clean)
-
-# --- 5. RAG ENGINE SETUP ---
+# --- 4. RAG ENGINE SETUP ---
 @st.cache_resource
 def setup_rag_chain():
+    # Using the latest embedding model
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
+    
+    # Initialize Vector Store
+    vector_store = Chroma(
+        persist_directory=CHROMA_PATH, 
+        embedding_function=embeddings
+    )
+    
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, streaming=True) 
+    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    retriever = vector_store.as_retriever(search_kwargs={"k": 6})
-    
+    # 1. Contextualize Question (Fixes the _type issue by being explicit)
     context_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Given a chat history and user question, formulate a standalone question. Do NOT answer it."),
+        ("system", "Given a chat history and a user question, formulate a standalone question."),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
     
     history_aware_retriever = create_history_aware_retriever(llm, retriever, context_prompt)
     
+    # 2. Answer Question
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are the Eco-Education AI, an expert on the work of {DOCUMENT_AUTHOR}. Use the context provided to answer the user question accurately.\n\nContext:\n{{context}}"),
+        ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Answer using the context below:\n\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -80,58 +78,36 @@ def setup_rag_chain():
     document_chain = create_stuff_documents_chain(llm, qa_prompt)
     return create_retrieval_chain(history_aware_retriever, document_chain)
 
-# --- 6. UI LAYOUT ---
+# --- 5. UI LAYOUT ---
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
-
-# Display unzip errors if they occurred
-if db_status not in ["extracted", "ready"]:
-    st.error(f"Database initialization failed: {db_status}")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- 7. SUGGESTED PROMPTS ---
-st.markdown("### Suggested Topics")
-cols = st.columns(3)
-prompts = ["What is Eco-Education?", "Tell me about the garden", "Ann's teaching philosophy"]
-
-for i, text in enumerate(prompts):
-    if cols[i].button(text):
-        st.session_state.btn_prompt = text
-
-# --- 8. CHAT LOGIC ---
-# Display conversation history
+# --- 6. CHAT LOGIC ---
 for msg in st.session_state.chat_history:
     st.chat_message("user" if isinstance(msg, HumanMessage) else "assistant").write(msg.content)
 
-# Handle user input
-user_input = st.chat_input("Ask about nature or education...")
-
-# Logic if a suggested button was clicked
-if "btn_prompt" in st.session_state:
-    user_input = st.session_state.btn_prompt
-    del st.session_state.btn_prompt
+user_input = st.chat_input("Ask a question...")
 
 if user_input:
-    # Add user message to history
     st.session_state.chat_history.append(HumanMessage(content=user_input))
     st.chat_message("user").write(user_input)
     
     with st.chat_message("assistant"):
-        if is_strictly_inappropriate(user_input):
-            st.markdown(REFUSAL_MESSAGE)
-            st.session_state.chat_history.append(AIMessage(content=REFUSAL_MESSAGE))
-        else:
-            try:
-                rag_chain = setup_rag_chain()
-                # Use st.write_stream for a nice typewriter effect
-                full_res = st.write_stream(
-                    chunk["answer"] for chunk in rag_chain.stream({
-                        "chat_history": st.session_state.chat_history, 
-                        "input": user_input
-                    }) if "answer" in chunk
-                )
-                st.session_state.chat_history.append(AIMessage(content=full_res))
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+        try:
+            rag_chain = setup_rag_chain()
+            
+            # Use explicit input mapping to satisfy LangChain's internal 'type' checks
+            stream = rag_chain.stream({
+                "input": user_input,
+                "chat_history": st.session_state.chat_history
+            })
+            
+            full_res = st.write_stream(chunk["answer"] for chunk in stream if "answer" in chunk)
+            st.session_state.chat_history.append(AIMessage(content=full_res))
+        except Exception as e:
+            st.error(f"Error: {e}")
+            if "type" in str(e).lower():
+                st.info("Tip: This is usually a database version mismatch. Try refreshing the app or re-uploading your chroma_db.zip.")
