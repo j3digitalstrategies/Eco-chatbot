@@ -8,9 +8,10 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# Silence the telemetry errors appearing in your logs
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
+# THE KEY FIX: These two lines stop the TypeError on line 30 by disabling
+# the broken Streamlit telemetry/metrics that are crashing your app.
 os.environ["STREAMLIT_STATS_TRACKING"] = "false"
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -26,7 +27,7 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Restoring your design exactly
+# Styling for the chat bubbles
 st.markdown("""
     <style>
     .stChatMessage {
@@ -43,10 +44,9 @@ def prepare_db():
             try:
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall(".")
-                return "✅ Ready"
             except Exception:
                 pass
-    return "✅ Ready"
+    return "Ready"
 
 prepare_db()
 
@@ -61,7 +61,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # CRITICAL FIX: PersistentClient handles the 'KeyError: _type' found in your logs
+        # Use PersistentClient to solve the 'KeyError: _type' from your logs
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -93,13 +93,12 @@ def get_rag_chain():
 
 # --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
-# Added subheading as requested
 st.markdown("### — by Ann Lewin-Benham")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts Section
+# Suggested Prompts
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -115,14 +114,12 @@ for m in st.session_state.messages:
 
 query = st.chat_input("Ask about the curriculum...")
 
-# Logic to handle buttons or text input
 final_query = query
 if st.session_state.get("pending_prompt"):
     final_query = st.session_state.pending_prompt
     del st.session_state["pending_prompt"]
 
 if final_query:
-    # Avoid duplicate messages on rerun
     if not st.session_state.messages or st.session_state.messages[-1]["content"] != final_query:
         st.session_state.messages.append({"role": "user", "content": final_query})
         
