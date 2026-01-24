@@ -8,8 +8,7 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# THE KEY FIX: These two lines stop the TypeError on line 30 by disabling
-# the broken Streamlit telemetry/metrics that are crashing your app.
+# --- CRITICAL FIXES FOR TYPEERROR & KEYERROR ---
 os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
@@ -27,7 +26,7 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Styling for the chat bubbles
+# Restored styling
 st.markdown("""
     <style>
     .stChatMessage {
@@ -61,7 +60,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Use PersistentClient to solve the 'KeyError: _type' from your logs
+        # Technical fix for the KeyError: '_type' in your logs
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
