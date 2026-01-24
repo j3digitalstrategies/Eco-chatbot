@@ -48,19 +48,13 @@ DOCUMENT_TITLE = "Eco-Education for Young Children"
 @st.cache_resource
 def setup_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    
-    # Initialize Vector Store
-    vector_store = Chroma(
-        persist_directory=CHROMA_PATH, 
-        embedding_function=embeddings
-    )
-    
+    vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, streaming=True) 
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
     # 1. Contextualize Question
     context_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Given a chat history and a user question, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it."),
+        ("system", "Given a chat history and a user question, formulate a standalone question."),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -69,7 +63,7 @@ def setup_rag_chain():
     
     # 2. Answer Question
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are the specialized AI assistant for the curriculum of {DOCUMENT_AUTHOR}. Use the following pieces of retrieved context to answer the user's question. If you don't know the answer based on the context, say you don't know.\n\nContext:\n{{context}}"),
+        ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Answer using the context:\n\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -81,37 +75,50 @@ def setup_rag_chain():
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# Initialize simplified history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 # --- 6. CHAT LOGIC ---
-# Display history
-for msg in st.session_state.chat_history:
-    role = "user" if isinstance(msg, HumanMessage) else "assistant"
-    st.chat_message(role).write(msg.content)
+# Display messages using Streamlit's chat_message
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 user_input = st.chat_input("Ask a question about the curriculum...")
 
 if user_input:
-    # Add user message
-    st.session_state.chat_history.append(HumanMessage(content=user_input))
-    st.chat_message("user").write(user_input)
+    # Display user message
+    st.chat_message("user").markdown(user_input)
     
+    # Convert session history to LangChain format for the model
+    chat_history = []
+    for m in st.session_state.messages:
+        if m["role"] == "user":
+            chat_history.append(HumanMessage(content=m["content"]))
+        else:
+            chat_history.append(AIMessage(content=m["content"]))
+
     with st.chat_message("assistant"):
         try:
             rag_chain = setup_rag_chain()
-            
-            # Explicitly pass the dictionary to avoid schema/type errors
-            response_container = st.empty()
+            response_placeholder = st.empty()
             full_response = ""
             
+            # Streaming the response
             for chunk in rag_chain.stream({
                 "input": user_input,
-                "chat_history": st.session_state.chat_history
+                "chat_history": chat_history
             }):
                 if "answer" in chunk:
                     full_response += chunk["answer"]
-                    response_container.markdown(full_response + "▌")
+                    response_placeholder.markdown(full_response + "▌")
             
-            response_container.markdown(full_response)
-            st.session
+            response_placeholder.markdown(full_response)
+            
+            # Save to session state
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            st.error(f"Error: {e}")
