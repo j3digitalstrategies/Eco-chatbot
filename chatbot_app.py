@@ -18,73 +18,59 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. CONFIG & API ---
 load_dotenv()
-CHROMA_PATH = "chroma_db_stable"
+CHROMA_PATH = "chroma_db_fresh"  # Changed name to force a new folder creation
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Styling Fix: Use unsafe_allow_html=True (NOT unsafe_allow_headers)
+# Styling: Restored to standard Streamlit feel but kept it clean
 st.markdown("""
     <style>
-    .stChatMessage {
-        border-radius: 15px;
-        padding: 10px;
-        margin-bottom: 10px;
-    }
-    .stButton>button {
-        width: 100%;
-        border-radius: 20px;
-        border: 1px solid #4CAF50;
-        background-color: white;
-        color: #4CAF50;
-    }
-    .stButton>button:hover {
-        background-color: #4CAF50;
-        color: white;
-    }
+    .stChatMessage { border-radius: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 
-# --- 2. DATABASE EXTRACTION ---
+# --- 2. DATABASE EXTRACTION (THE "NEW FOLDER" LOGIC) ---
 @st.cache_resource
 def prepare_db():
+    # If the folder doesn't exist, unzip it fresh
     if not os.path.exists(CHROMA_PATH):
-        if os.path.exists(ZIP_PATH):
-            try:
-                if os.path.exists("temp_extract"):
-                    shutil.rmtree("temp_extract")
-                
-                with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                    zip_ref.extractall("temp_extract")
-                
-                found_path = None
-                for root, dirs, files in os.walk("temp_extract"):
-                    if "chroma.sqlite3" in files:
-                        found_path = root
-                        break
-                
-                if found_path:
-                    if os.path.exists(CHROMA_PATH):
-                        shutil.rmtree(CHROMA_PATH)
-                    shutil.copytree(found_path, CHROMA_PATH)
-                    shutil.rmtree("temp_extract", ignore_errors=True)
-                    return "Database Ready"
-                return "Error: chroma.sqlite3 not found in zip"
-            except Exception as e:
-                return f"Extraction Error: {e}"
-        return "Error: zip file missing"
-    return "Database Ready"
+        if not os.path.exists(ZIP_PATH):
+            return f"Missing {ZIP_PATH} in GitHub repository."
+        
+        try:
+            # Create a clean slate
+            if os.path.exists("temp_extract"):
+                shutil.rmtree("temp_extract")
+            
+            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall("temp_extract")
+            
+            # Find the sqlite file inside the unzipped contents
+            found_path = None
+            for root, dirs, files in os.walk("temp_extract"):
+                if "chroma.sqlite3" in files:
+                    found_path = root
+                    break
+            
+            if found_path:
+                shutil.copytree(found_path, CHROMA_PATH)
+                shutil.rmtree("temp_extract", ignore_errors=True)
+                return "Success"
+            else:
+                return "Error: Could not find chroma.sqlite3 inside the zip."
+        except Exception as e:
+            return f"Unzip Error: {str(e)}"
+    return "Success"
 
 db_status = prepare_db()
 
 # --- 3. AI ENGINE ---
 @st.cache_resource
 def get_rag_chain(_api_key):
-    if not _api_key:
-        return None
-    
+    if not _api_key: return None
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
         client = chromadb.PersistentClient(path=CHROMA_PATH)
@@ -93,15 +79,12 @@ def get_rag_chain(_api_key):
             collection_name="langchain",
             embedding_function=embeddings,
         )
-        
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
-        
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for Eco-Education. Use the following context to answer: {context}"),
+            ("system", "You are an assistant for Eco-Education. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
-        
         return create_retrieval_chain(
             vectorstore.as_retriever(search_kwargs={"k": 3}),
             create_stuff_documents_chain(llm, prompt)
@@ -112,7 +95,11 @@ def get_rag_chain(_api_key):
 
 # --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
-st.caption("Curriculum Assistant by Ann Lewin-Benham")
+st.write("Curriculum Assistant by Ann Lewin-Benham")
+
+if db_status != "Success":
+    st.error(f"Database Status: {db_status}")
+    st.info("Check if your zip file is named 'chroma_db.zip' and is in the main folder of your GitHub.")
 
 if not api_key:
     st.error("🔑 OpenAI API Key missing in Streamlit Secrets!")
@@ -121,28 +108,31 @@ if not api_key:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts (Restored)
+# --- 5. SUGGESTED PROMPT BUTTONS (RESTORED) ---
 st.write("### Suggested Questions")
-cols = st.columns(3)
-suggestions = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
-
-for i, prompt_text in enumerate(suggestions):
-    if cols[i].button(prompt_text):
-        st.session_state.prompt_trigger = prompt_text
+c1, c2, c3 = st.columns(3)
+if c1.button("What is the waste module?"):
+    st.session_state.btn_query = "What is the waste module?"
+if c2.button("Tell me about recycling"):
+    st.session_state.btn_query = "Tell me about recycling"
+if c3.button("Eco-friendly tips"):
+    st.session_state.btn_query = "Give me some eco-friendly tips"
 
 # Display history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 5. CHAT ACTION ---
+# --- 6. CHAT LOGIC ---
 user_input = st.chat_input("Ask a question...")
 
-# Use either text input or button trigger
-final_query = user_input
-if "prompt_trigger" in st.session_state:
-    final_query = st.session_state.prompt_trigger
-    del st.session_state.prompt_trigger
+# Determine if the user used a button or typed
+final_query = None
+if user_input:
+    final_query = user_input
+elif "btn_query" in st.session_state:
+    final_query = st.session_state.btn_query
+    del st.session_state.btn_query
 
 if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
