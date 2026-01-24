@@ -8,6 +8,7 @@ import zipfile
 from dotenv import load_dotenv
 
 # --- 1. MANDATORY FIRST STREAMLIT COMMAND ---
+# This must remain at the very top to avoid the error you saw in the logs.
 st.set_page_config(page_title="Ann Lewin-Benham AI", layout="wide")
 
 # LangChain Imports
@@ -18,16 +19,23 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 2. THE UNZIPPER ---
+# --- 2. THE UNZIPPER (Optimized) ---
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
-if not os.path.exists(CHROMA_PATH) and os.path.exists(ZIP_PATH):
-    try:
-        with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-            zip_ref.extractall(".")
-    except Exception as e:
-        st.error(f"Unzip failed: {e}")
+@st.cache_resource
+def manage_database():
+    """Extracts the database if it doesn't exist and returns status."""
+    if not os.path.exists(CHROMA_PATH) and os.path.exists(ZIP_PATH):
+        try:
+            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall(".")
+            return "extracted"
+        except Exception as e:
+            return str(e)
+    return "ready"
+
+db_status = manage_database()
 
 # --- 3. CONFIGURATION & BRANDING ---
 if "OPENAI_API_KEY" in st.secrets:
@@ -64,7 +72,7 @@ def setup_rag_chain():
     history_aware_retriever = create_history_aware_retriever(llm, retriever, context_prompt)
     
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are the Eco-Education AI, an expert on the work of {DOCUMENT_AUTHOR}. Use the context to answer.\n\nContext:\n{{context}}"),
+        ("system", f"You are the Eco-Education AI, an expert on the work of {DOCUMENT_AUTHOR}. Use the context provided to answer the user question accurately.\n\nContext:\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -75,6 +83,10 @@ def setup_rag_chain():
 # --- 6. UI LAYOUT ---
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
+
+# Display unzip errors if they occurred
+if db_status not in ["extracted", "ready"]:
+    st.error(f"Database initialization failed: {db_status}")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -89,13 +101,37 @@ for i, text in enumerate(prompts):
         st.session_state.btn_prompt = text
 
 # --- 8. CHAT LOGIC ---
+# Display conversation history
 for msg in st.session_state.chat_history:
     st.chat_message("user" if isinstance(msg, HumanMessage) else "assistant").write(msg.content)
 
+# Handle user input
 user_input = st.chat_input("Ask about nature or education...")
+
+# Logic if a suggested button was clicked
 if "btn_prompt" in st.session_state:
     user_input = st.session_state.btn_prompt
     del st.session_state.btn_prompt
 
 if user_input:
-    st.session_state.chat_history.append(
+    # Add user message to history
+    st.session_state.chat_history.append(HumanMessage(content=user_input))
+    st.chat_message("user").write(user_input)
+    
+    with st.chat_message("assistant"):
+        if is_strictly_inappropriate(user_input):
+            st.markdown(REFUSAL_MESSAGE)
+            st.session_state.chat_history.append(AIMessage(content=REFUSAL_MESSAGE))
+        else:
+            try:
+                rag_chain = setup_rag_chain()
+                # Use st.write_stream for a nice typewriter effect
+                full_res = st.write_stream(
+                    chunk["answer"] for chunk in rag_chain.stream({
+                        "chat_history": st.session_state.chat_history, 
+                        "input": user_input
+                    }) if "answer" in chunk
+                )
+                st.session_state.chat_history.append(AIMessage(content=full_res))
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
