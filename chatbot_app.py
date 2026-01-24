@@ -52,7 +52,6 @@ def setup_rag_chain():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, streaming=True) 
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    # Contextualize Question
     context_prompt = ChatPromptTemplate.from_messages([
         ("system", "Given a chat history and a user question, formulate a standalone question."),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -61,7 +60,6 @@ def setup_rag_chain():
     
     history_aware_retriever = create_history_aware_retriever(llm, retriever, context_prompt)
     
-    # Answer Question
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Use the context to answer accurately:\n\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -75,19 +73,22 @@ def setup_rag_chain():
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
 
-# Use simple dictionaries for state to prevent the '_type' error
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 6. SUGGESTED PROMPTS ---
-suggested_prompts = ["What is Eco-Education?", "Tell me about the garden", "Ann's teaching philosophy"]
+# --- 6. SUGGESTED PROMPTS (Updated for clarity) ---
+suggested_prompts = [
+    "What are the main goals of Eco-Education?",
+    "How does the garden serve as a classroom?",
+    "Explain Ann's approach to observing children."
+]
 
 # --- 7. DISPLAY HISTORY ---
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 8. INPUT LOGIC (Suggestions + Chat Input) ---
+# --- 8. INPUT LOGIC ---
 if not st.session_state.messages:
     st.markdown("### Suggested Topics")
     cols = st.columns(len(suggested_prompts))
@@ -100,11 +101,10 @@ user_input = st.chat_input("Ask about nature or education...")
 if "pending_input" in st.session_state:
     user_input = st.session_state.pop("pending_input")
 
-# --- 9. PROCESSING & STREAMING ---
+# --- 9. PROCESSING ---
 if user_input:
     st.chat_message("user").markdown(user_input)
     
-    # Convert simple state back to LangChain objects for the AI
     chat_history = []
     for m in st.session_state.messages:
         if m["role"] == "user":
@@ -125,7 +125,6 @@ if user_input:
             
             res_box.markdown(full_res)
             
-            # Save and Refresh
             st.session_state.messages.append({"role": "user", "content": user_input})
             st.session_state.messages.append({"role": "assistant", "content": full_res})
             st.rerun()
