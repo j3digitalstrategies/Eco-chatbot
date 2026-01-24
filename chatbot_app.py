@@ -19,8 +19,8 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. SETTINGS ---
 load_dotenv()
-# Using a specific folder name to ensure a fresh extraction attempt
-DB_DIR = "db_production_final"
+# We use a versioned folder name to ensure a fresh start on deployment
+DB_DIR = "db_v26_fixed"
 CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
 ZIP_NAME = "chroma_db.zip"
 
@@ -30,68 +30,68 @@ st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 @st.cache_resource
 def prepare_database():
     try:
-        # If database already exists and is valid, skip extraction
+        # Check if already extracted
         if os.path.exists(CHROMA_PATH) and os.path.exists(os.path.join(CHROMA_PATH, "chroma.sqlite3")):
-            return True, "Database Online"
+            return True, "Database Ready"
 
         if not os.path.exists(ZIP_NAME):
-            return False, f"Error: {ZIP_NAME} missing from repository."
+            return False, f"Error: {ZIP_NAME} not found in repository root."
 
-        # Safety check for Git LFS pointers
-        if os.path.getsize(ZIP_NAME) < 5000:
-            return False, "Database file is a 'pointer' (Git LFS). Please re-upload the zip by dragging it directly into GitHub."
+        # Safety check for Git LFS pointer files
+        if os.path.getsize(ZIP_NAME) < 10000:
+            return False, "CORRUPT FILE: The zip file on GitHub is a 'link' (LFS). ACTION: Delete it on GitHub and re-upload by dragging the file directly into your browser."
 
-        # Extraction Process
-        temp_dir = "temp_unzip"
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+        # Extraction Logic
+        temp_extract = "temp_extract_dir"
+        if os.path.exists(temp_extract): shutil.rmtree(temp_extract)
         
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
-            z.extractall(temp_dir)
+            z.extractall(temp_extract)
 
-        # Locate the internal db folder
-        sqlite_loc = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
-        if not sqlite_loc:
-            return False, "Internal Error: chroma.sqlite3 not found in zip."
+        # Locate the actual database folder inside the zip
+        sqlite_file = next(Path(temp_extract).rglob("chroma.sqlite3"), None)
+        if not sqlite_file:
+            return False, "Internal Error: chroma.sqlite3 not found inside the zip archive."
 
         if os.path.exists(CHROMA_PATH): shutil.rmtree(CHROMA_PATH)
-        shutil.copytree(sqlite_loc.parent, CHROMA_PATH)
-        shutil.rmtree(temp_dir)
+        shutil.copytree(sqlite_file.parent, CHROMA_PATH)
+        shutil.rmtree(temp_extract)
         
-        return True, "Success"
+        return True, "Database Successfully Extracted"
     except Exception as e:
-        return False, f"Fatal Setup Error: {e}"
+        return False, f"Setup Error: {str(e)}"
 
-# --- 3. UI LAYOUT ---
-st.title("🌱 Eco-Education Curriculum Assistant")
-st.caption("AI-powered insights into Ann Lewin-Benham's curriculum.")
+# --- 3. UI HEADER ---
+st.title("🌱 Eco-Chatbot")
+st.write("Curriculum Assistant by Ann Lewin-Benham")
 
-ready, status = prepare_database()
+db_ok, db_status = prepare_database()
 
-if not ready:
-    st.error(status)
-    st.info("Try clicking 'Manage app' -> 'Reboot app' in the Streamlit menu.")
+if not db_ok:
+    st.error(db_status)
+    st.info("After fixing the file, remember to 'Reboot App' in the Streamlit menu.")
     st.stop()
 
-# --- 4. ENGINE (The fix for KeyError: '_type') ---
+# --- 4. AI ENGINE (Fixed for KeyError: '_type') ---
 @st.cache_resource
-def get_retrieval_chain(_key):
+def get_retrieval_chain(_api_key):
     try:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_key)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
         
-        # We use the PersistentClient directly. This bypasses the logic in 
-        # langchain-chroma that triggers the KeyError: '_type'.
+        # FIX: We initialize the PersistentClient DIRECTLY. 
+        # This bypasses the schema validation that causes the KeyError.
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         
         vectorstore = Chroma(
             client=client,
-            collection_name="langchain",
+            collection_name="langchain", # Default name from your ingest code
             embedding_function=embeddings
         )
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_key)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for the Eco-Education curriculum. Use the following context to answer. Context: {context}"),
+            ("system", "You are an assistant for the Eco-Education curriculum. Answer ONLY based on the context. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -101,40 +101,37 @@ def get_retrieval_chain(_key):
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"AI Engine Error: {e}")
+        st.error(f"AI Engine Failure: {e}")
         return None
 
-# --- 5. INTERACTION ---
+# --- 5. CHAT INTERFACE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Questions
+# Suggested Question Buttons (Horizontal Layout)
 st.write("### Suggested Topics")
 c1, c2, c3 = st.columns(3)
-btns = [
-    "What is the focus of the Waste module?",
-    "Tell me about the Recycling approach.",
-    "Give me some eco-friendly tips."
-]
+if c1.button("What is the focus of the Waste module?", use_container_width=True):
+    st.session_state.pending_query = "What is the focus of the Waste module?"
+if c2.button("Tell me about the Recycling approach.", use_container_width=True):
+    st.session_state.pending_query = "Tell me about the Recycling approach."
+if c3.button("Give me some eco-friendly tips.", use_container_width=True):
+    st.session_state.pending_query = "Give me some eco-friendly tips."
 
-if c1.button(btns[0], use_container_width=True): st.session_state.prompt = btns[0]
-if c2.button(btns[1], use_container_width=True): st.session_state.prompt = btns[1]
-if c3.button(btns[2], use_container_width=True): st.session_state.prompt = btns[2]
-
-# Display history
+# Display chat history
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# Process Input
-user_query = st.chat_input("Ask about the curriculum...")
-final_query = user_query if user_query else st.session_state.get("prompt")
+# Handle Inputs
+chat_input = st.chat_input("Ask a question about the curriculum...")
+query = chat_input if chat_input else st.session_state.get("pending_query")
 
-if final_query:
-    if "prompt" in st.session_state: del st.session_state.prompt
+if query:
+    if "pending_query" in st.session_state: del st.session_state.pending_query
     
-    st.session_state.messages.append({"role": "user", "content": final_query})
-    with st.chat_message("user"): st.markdown(final_query)
+    st.session_state.messages.append({"role": "user", "content": query})
+    with st.chat_message("user"): st.markdown(query)
 
     api_key = st.secrets.get("OPENAI_API_KEY")
     chain = get_retrieval_chain(api_key)
@@ -145,8 +142,8 @@ if final_query:
                 HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                 for m in st.session_state.messages[:-1]
             ]
-            with st.spinner("Searching curriculum..."):
-                res = chain.invoke({"input": final_query, "chat_history": history})
-                st.markdown(res["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": res["answer"]})
+            with st.spinner("Reviewing curriculum documents..."):
+                response = chain.invoke({"input": query, "chat_history": history})
+                st.markdown(response["answer"])
+                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
     st.rerun()
