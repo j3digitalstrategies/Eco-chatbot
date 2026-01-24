@@ -1,9 +1,10 @@
-streamlit==1.41.0
+streamlit==1.50.0
 langchain==0.3.7
-langchain-community==0.3.7
-langchain-openai==0.2.8
+langchain-openai==0.2.0
 langchain-chroma==0.1.4
+langchain-community==0.3.0
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+docx2txt==0.9
+unstructured==0.16.0
 pysqlite3-binary
-python-dotenv
-docx2txt
-unstructured
