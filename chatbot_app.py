@@ -6,6 +6,7 @@ import streamlit as st
 import os
 import zipfile
 import chromadb
+import shutil
 from dotenv import load_dotenv
 
 # Silence the telemetry errors seen in your logs
@@ -25,7 +26,6 @@ ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Keeping your requested background color and custom styling
 st.markdown("""
     <style>
     .stApp {
@@ -40,6 +40,8 @@ st.markdown("""
 # --- 2. DATABASE RECOVERY ---
 @st.cache_resource
 def prepare_db():
+    # If the folder exists but is corrupted (causing the KeyError), 
+    # we might need to clear it, but for now, we try to extract if missing.
     if not os.path.exists(CHROMA_PATH):
         if os.path.exists(ZIP_PATH):
             try:
@@ -64,11 +66,11 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # THE FIX: Using PersistentClient directly solves the KeyError: '_type'
-        # which is caused by a version mismatch in the automatic library discovery.
-        persistent_client = chromadb.PersistentClient(path=CHROMA_PATH)
+        # THE FIX: Explicitly using the PersistentClient to handle the local files
+        # This bypasses the internal discovery logic that triggers the KeyError.
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
-            client=persistent_client,
+            client=client,
             collection_name="langchain",
             embedding_function=embeddings,
         )
@@ -92,7 +94,9 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Vectorstore Error: {e}")
+        # Catching the specific configuration error
+        st.error(f"Database Configuration Error: {e}")
+        st.info("Try deleting the 'chroma_db' folder in your repo to allow a clean rebuild.")
         return None
 
 # --- 4. UI & SUGGESTED PROMPTS ---
@@ -101,42 +105,6 @@ st.title("🌱 Eco-Chatbot")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts Section
 st.subheader("Quick Questions")
 cols = st.columns(3)
-prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
-
-for i, p in enumerate(prompts):
-    if cols[i].button(p):
-        st.session_state.pending_prompt = p
-
-# --- 5. CHAT LOGIC ---
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
-
-query = st.chat_input("Ask about the curriculum...")
-
-# Logic to handle both text input and button clicks
-final_query = query
-if st.session_state.get("pending_prompt"):
-    final_query = st.session_state.pending_prompt
-    del st.session_state["pending_prompt"]
-
-if final_query:
-    st.session_state.messages.append({"role": "user", "content": final_query})
-    with st.chat_message("user"):
-        st.markdown(final_query)
-        
-    chain = get_rag_chain()
-    if chain:
-        with st.chat_message("assistant"):
-            history = [
-                HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
-                for m in st.session_state.messages[:-1]
-            ]
-            with st.spinner("Thinking..."):
-                response = chain.invoke({"input": final_query, "chat_history": history})
-                st.markdown(response["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
-    st.rerun()
+prompts = ["What is the waste module?", "Tell
