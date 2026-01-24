@@ -16,39 +16,25 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & API ---
+# --- 1. CONFIG ---
 load_dotenv()
-CHROMA_PATH = "chroma_db_fresh"  # Changed name to force a new folder creation
+CHROMA_PATH = "chroma_db_final_v1" # New folder name to force a clean build
 ZIP_PATH = "chroma_db.zip"
 
-st.set_page_config(page_title="Eco-Chatbot", layout="wide")
+st.set_page_config(page_title="Eco-Chatbot")
 
-# Styling: Restored to standard Streamlit feel but kept it clean
-st.markdown("""
-    <style>
-    .stChatMessage { border-radius: 15px; }
-    </style>
-""", unsafe_allow_html=True)
-
-api_key = st.secrets.get("OPENAI_API_KEY")
-
-# --- 2. DATABASE EXTRACTION (THE "NEW FOLDER" LOGIC) ---
+# --- 2. DATABASE EXTRACTION ---
 @st.cache_resource
 def prepare_db():
-    # If the folder doesn't exist, unzip it fresh
     if not os.path.exists(CHROMA_PATH):
         if not os.path.exists(ZIP_PATH):
-            return f"Missing {ZIP_PATH} in GitHub repository."
-        
+            return "Missing zip"
         try:
-            # Create a clean slate
             if os.path.exists("temp_extract"):
                 shutil.rmtree("temp_extract")
-            
             with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                 zip_ref.extractall("temp_extract")
             
-            # Find the sqlite file inside the unzipped contents
             found_path = None
             for root, dirs, files in os.walk("temp_extract"):
                 if "chroma.sqlite3" in files:
@@ -59,10 +45,9 @@ def prepare_db():
                 shutil.copytree(found_path, CHROMA_PATH)
                 shutil.rmtree("temp_extract", ignore_errors=True)
                 return "Success"
-            else:
-                return "Error: Could not find chroma.sqlite3 inside the zip."
+            return "No sqlite found"
         except Exception as e:
-            return f"Unzip Error: {str(e)}"
+            return str(e)
     return "Success"
 
 db_status = prepare_db()
@@ -74,11 +59,7 @@ def get_rag_chain(_api_key):
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
         client = chromadb.PersistentClient(path=CHROMA_PATH)
-        vectorstore = Chroma(
-            client=client,
-            collection_name="langchain",
-            embedding_function=embeddings,
-        )
+        vectorstore = Chroma(client=client, collection_name="langchain", embedding_function=embeddings)
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are an assistant for Eco-Education. Context: {context}"),
@@ -90,32 +71,29 @@ def get_rag_chain(_api_key):
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Engine Load Error: {e}")
+        st.error(f"Engine Error: {e}")
         return None
 
 # --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
 st.write("Curriculum Assistant by Ann Lewin-Benham")
 
-if db_status != "Success":
-    st.error(f"Database Status: {db_status}")
-    st.info("Check if your zip file is named 'chroma_db.zip' and is in the main folder of your GitHub.")
-
+api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
-    st.error("🔑 OpenAI API Key missing in Streamlit Secrets!")
+    st.error("API Key missing in Secrets!")
     st.stop()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- 5. SUGGESTED PROMPT BUTTONS (RESTORED) ---
+# SUGGESTED PROMPT BUTTONS
 st.write("### Suggested Questions")
-c1, c2, c3 = st.columns(3)
-if c1.button("What is the waste module?"):
+col1, col2, col3 = st.columns(3)
+if col1.button("What is the waste module?"):
     st.session_state.btn_query = "What is the waste module?"
-if c2.button("Tell me about recycling"):
+if col2.button("Tell me about recycling"):
     st.session_state.btn_query = "Tell me about recycling"
-if c3.button("Eco-friendly tips"):
+if col3.button("Eco-friendly tips"):
     st.session_state.btn_query = "Give me some eco-friendly tips"
 
 # Display history
@@ -123,11 +101,10 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# --- 6. CHAT LOGIC ---
+# --- 5. CHAT LOGIC ---
 user_input = st.chat_input("Ask a question...")
-
-# Determine if the user used a button or typed
 final_query = None
+
 if user_input:
     final_query = user_input
 elif "btn_query" in st.session_state:
@@ -146,11 +123,11 @@ if final_query:
                 HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
                 for m in st.session_state.messages[:-1]
             ]
-            try:
-                with st.spinner("Thinking..."):
-                    response = chain.invoke({"input": final_query, "chat_history": history})
-                    st.markdown(response["answer"])
-                    st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
-            except Exception as e:
-                st.error(f"Chat Error: {e}")
+            with st.spinner("Searching..."):
+                try:
+                    res = chain.invoke({"input": final_query, "chat_history": history})
+                    st.markdown(res["answer"])
+                    st.session_state.messages.append({"role": "assistant", "content": res["answer"]})
+                except Exception as e:
+                    st.error(f"Chat Error: {e}")
     st.rerun()
