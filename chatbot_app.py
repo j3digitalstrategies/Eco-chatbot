@@ -8,9 +8,9 @@ import zipfile
 import chromadb
 from dotenv import load_dotenv
 
-# This prevents the metrics/telemetry crash you've been seeing
-os.environ["STREAMLIT_STATS_TRACKING"] = "false"
+# Silence the telemetry errors appearing in your logs
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["STREAMLIT_STATS_TRACKING"] = "false"
 
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -19,12 +19,21 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG ---
+# --- 1. CONFIG & STYLING ---
 load_dotenv()
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
+
+# Restoring your design exactly
+st.markdown("""
+    <style>
+    .stChatMessage {
+        border-radius: 15px;
+    }
+    </style>
+    """, unsafe_allow_headers=True)
 
 # --- 2. DATABASE RECOVERY ---
 @st.cache_resource
@@ -34,9 +43,10 @@ def prepare_db():
             try:
                 with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
                     zip_ref.extractall(".")
+                return "✅ Ready"
             except Exception:
                 pass
-    return "Ready"
+    return "✅ Ready"
 
 prepare_db()
 
@@ -51,8 +61,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # THE FIX: Using PersistentClient instead of standard Chroma initialization
-        # This is the only way to "make it work" with the current KeyError: '_type' bug
+        # CRITICAL FIX: PersistentClient handles the 'KeyError: _type' found in your logs
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -82,13 +91,15 @@ def get_rag_chain():
         st.error(f"Database Error: {e}")
         return None
 
-# --- 4. UI & LOGIC ---
+# --- 4. UI ---
 st.title("🌱 Eco-Chatbot")
+# Added subheading as requested
+st.markdown("### — by Ann Lewin-Benham")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Quick Buttons
+# Suggested Prompts Section
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -97,19 +108,24 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# Display Chat
+# --- 5. CHAT LOGIC ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
 query = st.chat_input("Ask about the curriculum...")
 
-final_query = query or st.session_state.get("pending_prompt")
-if "pending_prompt" in st.session_state:
+# Logic to handle buttons or text input
+final_query = query
+if st.session_state.get("pending_prompt"):
+    final_query = st.session_state.pending_prompt
     del st.session_state["pending_prompt"]
 
 if final_query:
-    st.session_state.messages.append({"role": "user", "content": final_query})
+    # Avoid duplicate messages on rerun
+    if not st.session_state.messages or st.session_state.messages[-1]["content"] != final_query:
+        st.session_state.messages.append({"role": "user", "content": final_query})
+        
     with st.chat_message("user"):
         st.markdown(final_query)
         
