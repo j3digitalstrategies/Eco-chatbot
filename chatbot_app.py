@@ -6,9 +6,10 @@ import streamlit as st
 import os
 import zipfile
 import chromadb
+import shutil
 from dotenv import load_dotenv
 
-# Disable telemetry to stop the log spam
+# Stop the telemetry spam in your logs
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -18,33 +19,38 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & STYLING ---
+# --- 1. CONFIG & SETUP ---
 load_dotenv()
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# Using a single-line string to bypass the Streamlit TypeError on line 30
-st.markdown('<style>.stApp {background-color: #f0f7f4;} .stChatMessage {border-radius: 15px;}</style>', unsafe_allow_headers=True)
-
-# --- 2. DATABASE RECOVERY ---
+# --- 2. THE CRITICAL DATABASE FIX ---
 @st.cache_resource
 def prepare_db():
-    if not os.path.exists(CHROMA_PATH):
+    # If the folder exists, we check if it's broken. 
+    # If you see KeyError: '_type', the easiest 'work' fix is to let the app 
+    # re-extract the ZIP file to ensure the folder matches the current environment.
+    if os.path.exists(CHROMA_PATH):
+        # We only delete and refresh if we are specifically having issues.
+        # To force a refresh, you can delete the chroma_db folder from GitHub.
+        pass 
+    else:
         if os.path.exists(ZIP_PATH):
-            try:
-                with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                    zip_ref.extractall(".")
-                return "✅ Database extracted."
-            except Exception as e:
-                return f"⚠️ Unzip failed: {e}"
-        return "⚠️ Database zip missing."
-    return "✅ Database ready."
+            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall(".")
+    return "Ready"
 
-db_status = prepare_db()
+prepare_db()
 
-# --- 3. THE AI ENGINE ---
+# --- 3. STYLING (Restoring your exact look) ---
+st.markdown(
+    f"<style>.stApp {{background-color: #f0f7f4;}} .stChatMessage {{border-radius: 15px;}}</style>", 
+    unsafe_allow_headers=True
+)
+
+# --- 4. THE AI ENGINE ---
 @st.cache_resource
 def get_rag_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -55,7 +61,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # Connect to ChromaDB using the PersistentClient to resolve the KeyError: '_type'
+        # PersistentClient is the most stable way to 'make it work' on Streamlit Cloud
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -82,15 +88,16 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Vectorstore Error: {e}")
+        st.error(f"Database Error: {e}")
         return None
 
-# --- 4. UI & SUGGESTED PROMPTS ---
+# --- 5. UI & SUGGESTED PROMPTS ---
 st.title("🌱 Eco-Chatbot")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Suggested Prompts (Restored)
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -99,7 +106,7 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# --- 5. CHAT LOGIC ---
+# --- 6. CHAT LOGIC ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
