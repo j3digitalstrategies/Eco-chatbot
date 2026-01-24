@@ -47,7 +47,6 @@ DOCUMENT_TITLE = "Eco-Education for Young Children"
 # --- 4. RAG ENGINE SETUP ---
 @st.cache_resource
 def setup_rag_chain():
-    # Using the latest embedding model
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
     
     # Initialize Vector Store
@@ -59,9 +58,9 @@ def setup_rag_chain():
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, streaming=True) 
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     
-    # 1. Contextualize Question (Fixes the _type issue by being explicit)
+    # 1. Contextualize Question
     context_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Given a chat history and a user question, formulate a standalone question."),
+        ("system", "Given a chat history and a user question, formulate a standalone question which can be understood without the chat history. Do NOT answer the question, just reformulate it."),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -70,7 +69,7 @@ def setup_rag_chain():
     
     # 2. Answer Question
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", f"You are the assistant for {DOCUMENT_AUTHOR}. Answer using the context below:\n\n{{context}}"),
+        ("system", f"You are the specialized AI assistant for the curriculum of {DOCUMENT_AUTHOR}. Use the following pieces of retrieved context to answer the user's question. If you don't know the answer based on the context, say you don't know.\n\nContext:\n{{context}}"),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
@@ -86,12 +85,15 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 # --- 6. CHAT LOGIC ---
+# Display history
 for msg in st.session_state.chat_history:
-    st.chat_message("user" if isinstance(msg, HumanMessage) else "assistant").write(msg.content)
+    role = "user" if isinstance(msg, HumanMessage) else "assistant"
+    st.chat_message(role).write(msg.content)
 
-user_input = st.chat_input("Ask a question...")
+user_input = st.chat_input("Ask a question about the curriculum...")
 
 if user_input:
+    # Add user message
     st.session_state.chat_history.append(HumanMessage(content=user_input))
     st.chat_message("user").write(user_input)
     
@@ -99,15 +101,17 @@ if user_input:
         try:
             rag_chain = setup_rag_chain()
             
-            # Use explicit input mapping to satisfy LangChain's internal 'type' checks
-            stream = rag_chain.stream({
+            # Explicitly pass the dictionary to avoid schema/type errors
+            response_container = st.empty()
+            full_response = ""
+            
+            for chunk in rag_chain.stream({
                 "input": user_input,
                 "chat_history": st.session_state.chat_history
-            })
+            }):
+                if "answer" in chunk:
+                    full_response += chunk["answer"]
+                    response_container.markdown(full_response + "▌")
             
-            full_res = st.write_stream(chunk["answer"] for chunk in stream if "answer" in chunk)
-            st.session_state.chat_history.append(AIMessage(content=full_res))
-        except Exception as e:
-            st.error(f"Error: {e}")
-            if "type" in str(e).lower():
-                st.info("Tip: This is usually a database version mismatch. Try refreshing the app or re-uploading your chroma_db.zip.")
+            response_container.markdown(full_response)
+            st.session
