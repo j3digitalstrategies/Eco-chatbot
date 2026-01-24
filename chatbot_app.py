@@ -8,7 +8,7 @@ import zipfile
 import random
 from dotenv import load_dotenv
 
-# Essential LangChain Imports
+# Essential LangChain Imports - Updated for 0.3.x compatibility
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -68,10 +68,9 @@ def setup_rag_chain():
     
     retriever = vector_store.as_retriever(search_kwargs={"k": 6})
     
-    # Fix: Use MessagesPlaceholder instead of ("placeholder", "{chat_history}")
     context_prompt = ChatPromptTemplate.from_messages([
         ("system", "Formulate a standalone question based on history. Do NOT answer it."),
-        MessagesPlaceholder("chat_history"),
+        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
     
@@ -79,7 +78,7 @@ def setup_rag_chain():
     
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_TEMPLATE),
-        MessagesPlaceholder("chat_history"),
+        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ]).partial(DOCUMENT_AUTHOR=DOCUMENT_AUTHOR, REFUSAL_MESSAGE=REFUSAL_MESSAGE)
     
@@ -89,27 +88,18 @@ def setup_rag_chain():
 # --- 5. UI LOGIC ---
 st.set_page_config(page_title="Eco-Education Assistant", layout="wide")
 
-# Custom Styling for the "Eco" look
-st.markdown("""
-    <style>
-    .stApp { background-color: #f8faf8; }
-    h1 { color: #2e4d2e; }
-    </style>
-    """, unsafe_base_with_rows=True)
-
 if HISTORY_KEY not in st.session_state: 
     st.session_state[HISTORY_KEY] = []
 
 st.title(f"🌱 {DOCUMENT_TITLE}")
 st.markdown(f"**By {DOCUMENT_AUTHOR}**")
 
-# Display Chat History
+# Display Chat
 for msg in st.session_state[HISTORY_KEY]:
     st.chat_message("user" if isinstance(msg, HumanMessage) else "assistant").markdown(msg.content)
 
 # Input
 if user_input := st.chat_input("Ask about nature or education..."):
-    # Add user message to history
     st.session_state[HISTORY_KEY].append(HumanMessage(content=user_input))
     st.chat_message("user").markdown(user_input)
         
@@ -120,7 +110,6 @@ if user_input := st.chat_input("Ask about nature or education..."):
         else:
             try:
                 rag_chain = setup_rag_chain()
-                # Streaming with the fixed dictionary structure
                 full_res = st.write_stream(
                     chunk["answer"] for chunk in rag_chain.stream({
                         "chat_history": st.session_state[HISTORY_KEY], 
@@ -129,4 +118,4 @@ if user_input := st.chat_input("Ask about nature or education..."):
                 )
                 st.session_state[HISTORY_KEY].append(AIMessage(content=full_res))
             except Exception as e:
-                st.error(f"Something went wrong: {e}")
+                st.error(f"Error: {e}")
