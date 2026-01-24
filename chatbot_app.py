@@ -6,10 +6,9 @@ import streamlit as st
 import os
 import zipfile
 import chromadb
-import shutil
 from dotenv import load_dotenv
 
-# Stop the telemetry spam in your logs
+# Silence the telemetry errors that are cluttering your logs
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 from langchain_chroma import Chroma
@@ -19,38 +18,42 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIG & SETUP ---
+# --- 1. CONFIG & STYLING (RESTORED) ---
 load_dotenv()
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide")
 
-# --- 2. THE CRITICAL DATABASE FIX ---
+# Restoring your specific green background and chat styling
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f0f7f4;
+    }
+    .stChatMessage {
+        border-radius: 15px;
+    }
+    </style>
+    """, unsafe_allow_headers=True)
+
+# --- 2. DATABASE RECOVERY ---
 @st.cache_resource
 def prepare_db():
-    # If the folder exists, we check if it's broken. 
-    # If you see KeyError: '_type', the easiest 'work' fix is to let the app 
-    # re-extract the ZIP file to ensure the folder matches the current environment.
-    if os.path.exists(CHROMA_PATH):
-        # We only delete and refresh if we are specifically having issues.
-        # To force a refresh, you can delete the chroma_db folder from GitHub.
-        pass 
-    else:
+    if not os.path.exists(CHROMA_PATH):
         if os.path.exists(ZIP_PATH):
-            with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall(".")
-    return "Ready"
+            try:
+                with zipfile.ZipFile(ZIP_PATH, 'r') as zip_ref:
+                    zip_ref.extractall(".")
+                return "✅ Database extracted."
+            except Exception as e:
+                return f"⚠️ Unzip failed: {e}"
+        return "⚠️ Database zip missing."
+    return "✅ Database ready."
 
-prepare_db()
+db_status = prepare_db()
 
-# --- 3. STYLING (Restoring your exact look) ---
-st.markdown(
-    f"<style>.stApp {{background-color: #f0f7f4;}} .stChatMessage {{border-radius: 15px;}}</style>", 
-    unsafe_allow_headers=True
-)
-
-# --- 4. THE AI ENGINE ---
+# --- 3. THE AI ENGINE ---
 @st.cache_resource
 def get_rag_chain():
     api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -61,7 +64,7 @@ def get_rag_chain():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
     
     try:
-        # PersistentClient is the most stable way to 'make it work' on Streamlit Cloud
+        # TECHNICAL FIX: Using PersistentClient to handle the data version mismatch
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         vectorstore = Chroma(
             client=client,
@@ -88,16 +91,16 @@ def get_rag_chain():
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Database Error: {e}")
+        st.error(f"Vectorstore Error: {e}")
         return None
 
-# --- 5. UI & SUGGESTED PROMPTS ---
+# --- 4. UI & SUGGESTED PROMPTS (RESTORED) ---
 st.title("🌱 Eco-Chatbot")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggested Prompts (Restored)
+# Restoring your 3-column suggested prompts
 st.subheader("Quick Questions")
 cols = st.columns(3)
 prompts = ["What is the waste module?", "Tell me about recycling", "Eco-friendly tips"]
@@ -106,15 +109,17 @@ for i, p in enumerate(prompts):
     if cols[i].button(p):
         st.session_state.pending_prompt = p
 
-# --- 6. CHAT LOGIC ---
+# --- 5. CHAT LOGIC ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
 query = st.chat_input("Ask about the curriculum...")
 
-final_query = query or st.session_state.get("pending_prompt")
-if "pending_prompt" in st.session_state:
+# Handle both input types
+final_query = query
+if st.session_state.get("pending_prompt"):
+    final_query = st.session_state.pending_prompt
     del st.session_state["pending_prompt"]
 
 if final_query:
