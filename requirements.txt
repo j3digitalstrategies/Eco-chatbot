@@ -1,0 +1,10 @@
+streamlit==1.50.0
+langchain-openai==0.3.35
+langchain-chroma==0.2.6
+langchain-community==0.3.31
+pydantic-settings==2.11.0
+python-dotenv==1.1.1
+docx2txt==0.9
+unstructured==0.18.15
+pysqlite3-binary
+python-magic-bin==0.4.14
