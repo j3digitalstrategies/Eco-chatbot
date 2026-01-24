@@ -5,9 +5,14 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import zipfile
+import chromadb
 from dotenv import load_dotenv
 
-# --- 1. PAGE CONFIG ---
+# --- 1. DISABLE CHROMADB TELEMETRY (Fixes the log error) ---
+from chromadb.config import Settings
+client_settings = Settings(anonymized_telemetry=False)
+
+# --- 2. PAGE CONFIG ---
 st.set_page_config(page_title="Ann Lewin-Benham AI", layout="wide")
 
 # LangChain Imports
@@ -22,7 +27,7 @@ except ImportError as e:
     st.error(f"Missing dependency: {e}")
     st.stop()
 
-# --- 2. DATABASE MANAGEMENT ---
+# --- 3. DATABASE MANAGEMENT ---
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
@@ -40,7 +45,7 @@ def manage_database():
 
 db_msg = manage_database()
 
-# --- 3. API KEY ---
+# --- 4. API KEY ---
 def get_api_key():
     if "OPENAI_API_KEY" in st.secrets:
         return st.secrets["OPENAI_API_KEY"]
@@ -52,12 +57,17 @@ if not api_key:
     st.error("🔑 OPENAI_API_KEY is missing in Streamlit Secrets.")
     st.stop()
 
-# --- 4. RAG ENGINE ---
+# --- 5. RAG ENGINE ---
 @st.cache_resource
 def setup_rag_chain():
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=api_key)
-        vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
+        # Initialize vector store with telemetry disabled
+        vector_store = Chroma(
+            persist_directory=CHROMA_PATH, 
+            embedding_function=embeddings,
+            client_settings=client_settings
+        )
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=api_key)
         retriever = vector_store.as_retriever(search_kwargs={"k": 5})
         
@@ -73,19 +83,18 @@ def setup_rag_chain():
         st.error(f"AI Setup Error: {e}")
         return None
 
-# --- 5. UI & SESSION STATE ---
+# --- 6. UI & SESSION STATE ---
 st.title("🌱 Ann Lewin-Benham AI")
 st.caption(f"System: {db_msg}")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 6. SUGGESTED PROMPTS (EXACTLY 3) ---
+# --- 7. SUGGESTED PROMPTS (EXACTLY 3) ---
 suggested_prompts = [
     "What are the core principles of Eco-Education?",
     "How does the garden serve as a classroom?",
@@ -99,7 +108,7 @@ if not st.session_state.messages:
         if cols[i].button(prompt):
             st.session_state.active_input = prompt
 
-# --- 7. INPUT LOGIC ---
+# --- 8. INPUT LOGIC ---
 user_input = st.chat_input("Ask a question about the curriculum...")
 
 if "active_input" in st.session_state:
@@ -119,12 +128,12 @@ if user_input:
                     for m in st.session_state.messages[:-1]
                 ]
                 
-                with st.spinner("Searching documents..."):
+                with st.spinner("Thinking..."):
                     response = chain.invoke({"input": user_input, "chat_history": history})
                     full_answer = response["answer"]
                     st.markdown(full_answer)
                     st.session_state.messages.append({"role": "assistant", "content": full_answer})
         except Exception as e:
-            st.error(f"Processing Error: {e}")
+            st.error(f"Connection Error: {e}")
 
     st.rerun()
