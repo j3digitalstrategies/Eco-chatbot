@@ -5,8 +5,9 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
 import os
 import zipfile
-import random
 from dotenv import load_dotenv
+
+# Updated Imports for LangChain 1.x
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,7 +15,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. THE UNZIPPER (New Step) ---
+# --- 1. THE UNZIPPER ---
 CHROMA_PATH = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 
@@ -32,8 +33,6 @@ else:
 EMBEDDING_MODEL = "text-embedding-3-small"
 LLM_MODEL = "gpt-4o-mini" 
 HISTORY_KEY = "chat_history_list_lc"
-USED_PROMPTS_KEY = "used_suggested_prompts"
-CURRENT_SUGGESTIONS = "current_suggestions"
 
 DOCUMENT_AUTHOR = "Ann Lewin-Benham" 
 DOCUMENT_TITLE = "Eco-Education for Young Children" 
