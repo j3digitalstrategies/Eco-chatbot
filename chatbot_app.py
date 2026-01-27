@@ -41,7 +41,7 @@ st.markdown("""
     }
     </style>
     <div class="mobile-tip">
-        <b>📱 Mobile User Tip:</b> Tap the <b>></b> arrow in the top-left corner to find your <b>Suggested Prompts</b>!
+        <b>📱 Mobile User Tip:</b> Tap the <b>>></b> arrow in the top-left corner to find your <b>Suggested Prompts</b>!
     </div>
     """, unsafe_allow_html=True)
 
