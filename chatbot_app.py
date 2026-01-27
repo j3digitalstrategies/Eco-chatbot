@@ -21,16 +21,18 @@ DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
 
-# Mobile Detection CSS: Only show the "mobile-tip" div if screen width < 768px
+# FIXED MOBILE TIP: Theme-aware colors
 st.markdown("""
     <style>
     .mobile-tip {
         display: none;
-        background-color: #f0f2f6;
-        padding: 10px;
+        background-color: rgba(128, 128, 128, 0.1); /* Transparent gray that works on any background */
+        color: inherit; /* Takes the theme's text color */
+        padding: 15px;
         border-radius: 10px;
-        border: 1px solid #dfe1e5;
+        border: 1px solid #2e7d32; /* Eco-green border */
         margin-bottom: 20px;
+        text-align: center;
     }
     @media (max-width: 768px) {
         .mobile-tip {
@@ -39,7 +41,7 @@ st.markdown("""
     }
     </style>
     <div class="mobile-tip">
-        <b>📱 Mobile User Tip:</b> Tap the <b>></b> arrow in the top-left corner to find <b>Suggested Prompts</b>!
+        <b>📱 Mobile User Tip:</b> Tap the <b>></b> arrow in the top-left corner to find your <b>Suggested Prompts</b>!
     </div>
     """, unsafe_allow_html=True)
 
@@ -50,7 +52,7 @@ You represent the pedagogical work of Ann Lewin-Benham.
 STRICT CLASSROOM PROTOCOL:
 1. SAFEGUARD: Never discuss explicit, violent, or sensitive adult content. 
 2. REFUSAL: If asked about adult topics, refuse and pivot back to the curriculum.
-3. SCOPE: Link general child-safe questions back to the curriculum strategies.
+3. SCOPE: Focus on the curriculum. Link general curiosity back to Ann Lewin-Benham's methods.
 """
 
 SUGGESTION_PROMPT = """
