@@ -3,8 +3,8 @@ import os
 import glob
 from dotenv import load_dotenv
 
-# These are the imports causing the current error; they require 'langchain' in requirements.txt
-from langchain.chains import create_retrieval_chain
+# --- UPDATED IMPORTS FOR NEW LANGCHAIN VERSION ---
+from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -22,7 +22,7 @@ st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 @st.cache_resource
 def get_bot_chain(_api_key):
     if not os.path.exists(DOCS_DIR):
-        st.error(f"❌ Folder '{DOCS_DIR}' not found. Please create it in GitHub.")
+        st.error(f"❌ Folder '{DOCS_DIR}' not found.")
         return None
 
     valid_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md'}
@@ -30,7 +30,7 @@ def get_bot_chain(_api_key):
     actual_docs = [f for f in all_files if os.path.isfile(f) and os.path.splitext(f)[1].lower() in valid_extensions]
     
     if not actual_docs:
-        st.warning(f"⚠️ No compatible documents found. Found {len(all_files)} total items.")
+        st.warning(f"⚠️ No compatible documents found. Items found: {len(all_files)}")
         return None
 
     try:
