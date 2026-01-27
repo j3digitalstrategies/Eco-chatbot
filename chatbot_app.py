@@ -3,15 +3,15 @@ import os
 import glob
 from dotenv import load_dotenv
 
-# --- UPDATED IMPORTS FOR NEW LANGCHAIN VERSION ---
-from langchain.chains.retrieval import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader
+# Basic LangChain imports (Proven to be installed in your logs)
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. CONFIG ---
 load_dotenv()
@@ -30,18 +30,12 @@ def get_bot_chain(_api_key):
     actual_docs = [f for f in all_files if os.path.isfile(f) and os.path.splitext(f)[1].lower() in valid_extensions]
     
     if not actual_docs:
-        st.warning(f"⚠️ No compatible documents found. Items found: {len(all_files)}")
+        st.warning(f"⚠️ No compatible documents found. Items: {len(all_files)}")
         return None
 
     try:
         with st.spinner(f"🌱 Indexing {len(actual_docs)} files..."):
-            loader = DirectoryLoader(
-                DOCS_DIR, 
-                glob="**/*.*", 
-                loader_cls=UnstructuredFileLoader,
-                silent_errors=True,
-                recursive=True
-            )
+            loader = DirectoryLoader(DOCS_DIR, glob="**/*.*", loader_cls=UnstructuredFileLoader, silent_errors=True, recursive=True)
             docs = loader.load()
             
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -49,18 +43,30 @@ def get_bot_chain(_api_key):
             
             embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
             vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             
+            # Setup AI Brain
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
+            
+            # The Prompt
             prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an assistant for the Eco-Education curriculum. Use the context to answer. Context: {context}"),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
             ])
-            
-            return create_retrieval_chain(
-                vectorstore.as_retriever(search_kwargs={"k": 5}),
-                create_stuff_documents_chain(llm, prompt)
+
+            # --- THE MODERN CHAIN (No 'langchain.chains' needed!) ---
+            def format_docs(docs):
+                return "\n\n".join(doc.page_content for doc in docs)
+
+            rag_chain = (
+                {"context": retriever | format_docs, "input": RunnablePassthrough(), "chat_history": RunnablePassthrough()}
+                | prompt
+                | llm
+                | StrOutputParser()
             )
+            
+            return rag_chain
     except Exception as e:
         st.error(f"Engine failure: {e}")
         return None
@@ -87,7 +93,8 @@ if user_input:
         if chain:
             history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
             with st.spinner("Analyzing curriculum..."):
-                response = chain.invoke({"input": user_input, "chat_history": history})
-                st.markdown(response["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+                # Call the chain directly
+                response_text = chain.invoke({"input": user_input, "chat_history": history})
+                st.markdown(response_text)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
     st.rerun()
