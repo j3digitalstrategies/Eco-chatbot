@@ -3,12 +3,13 @@ import os
 import glob
 from dotenv import load_dotenv
 
+# These are the imports causing the current error; they require 'langchain' in requirements.txt
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -17,43 +18,32 @@ load_dotenv()
 DOCS_DIR = "curriculum_docs"
 st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 
-# --- 2. THE ENGINE (With Compatibility Filter) ---
+# --- 2. THE ENGINE ---
 @st.cache_resource
 def get_bot_chain(_api_key):
-    # Check if folder exists
     if not os.path.exists(DOCS_DIR):
-        st.error(f"❌ Folder '{DOCS_DIR}' not found in GitHub. Please create it and upload your files.")
+        st.error(f"❌ Folder '{DOCS_DIR}' not found. Please create it in GitHub.")
         return None
 
-    # Supported Extensions
     valid_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md'}
-    
-    # Diagnostic: Count valid files
     all_files = glob.glob(os.path.join(DOCS_DIR, "**/*.*"), recursive=True)
     actual_docs = [f for f in all_files if os.path.isfile(f) and os.path.splitext(f)[1].lower() in valid_extensions]
     
     if not actual_docs:
-        st.warning(f"⚠️ No compatible documents found in /{DOCS_DIR}. Only PDF, DOCX, and TXT are supported.")
+        st.warning(f"⚠️ No compatible documents found. Found {len(all_files)} total items.")
         return None
 
     try:
-        with st.spinner(f"🌱 Indexing {len(actual_docs)} compatible files..."):
-            # The 'silent_errors=True' and 'show_progress=True' help handle rogue files
+        with st.spinner(f"🌱 Indexing {len(actual_docs)} files..."):
             loader = DirectoryLoader(
                 DOCS_DIR, 
-                glob="**/*.*", # Look everywhere
+                glob="**/*.*", 
                 loader_cls=UnstructuredFileLoader,
-                silent_errors=True, # Skip files it can't read
+                silent_errors=True,
                 recursive=True
             )
-            
-            # This loads only the documents that Unstructured can actually handle
             docs = loader.load()
             
-            if not docs:
-                st.error("❌ Failed to extract text from your documents. Check if they are password protected.")
-                return None
-
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             splits = text_splitter.split_documents(docs)
             
@@ -62,7 +52,7 @@ def get_bot_chain(_api_key):
             
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
             prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are an assistant for the Eco-Education curriculum. Answer based ONLY on the provided context. Context: {context}"),
+                ("system", "You are an assistant for the Eco-Education curriculum. Use the context to answer. Context: {context}"),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
             ])
