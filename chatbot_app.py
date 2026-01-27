@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import glob
 import json
+import time
 from dotenv import load_dotenv
 
 # Core LangChain & AI
@@ -21,22 +22,18 @@ VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 
 SYSTEM_BEHAVIOR = """
-You are the Eco-Education Curriculum Assistant. Your "brain" consists of the overarching 
-Eco-Education curriculum written by Ann Lewin-Benham.
+You are the Eco-Education Curriculum Assistant, an expert on the work of Ann Lewin-Benham.
 
-CORE RULES:
-1. Treat all documents as a single unified curriculum by Ann Lewin-Benham.
-2. If the answer is in the curriculum, prioritize that information.
-3. If the answer is NOT in the curriculum, use your general knowledge but mention it's supplementary.
-4. SAFEGUARD: Do not provide instructions on harmful activities or illegal acts.
+STRICT CLASSROOM PROTOCOL:
+1. SAFEGUARD: You must never discuss content that is sexually explicit, violent, or sensitive for young children. 
+2. REFUSAL: If a user asks about adult topics, pornography, or sensitive content, you MUST refuse. 
+   - Response: "I am here to discuss the Eco-Education curriculum. Let's return to the curriculum by Ann Lewin-Benham."
+3. SCOPE: Your primary focus is the curriculum. You may answer unrelated child-safe curiosity questions but link them back to the curriculum strategies.
 """
 
-# Prompt to generate the adaptive suggestions
 SUGGESTION_PROMPT = """
-Based on the following conversation about the Eco-Education curriculum, generate 3 follow-up questions 
-that a curious educator might ask to go deeper into the topic. 
-Keep the questions concise and relevant to Ann Lewin-Benham's work.
-Return ONLY a JSON list of strings. Format: ["Question 1", "Question 2", "Question 3"]
+Based on the discussion of Ann Lewin-Benham's curriculum, generate 3 child-safe follow-up "Suggested Prompts".
+Return ONLY a JSON list of strings. Format: ["Prompt 1", "Prompt 2", "Prompt 3"]
 """
 
 # --- 2. THE ENGINE ---
@@ -44,9 +41,11 @@ Return ONLY a JSON list of strings. Format: ["Question 1", "Question 2", "Questi
 def get_bot_chain(_api_key):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
     
+    # Check if DB exists to bypass file reading (Speed Optimization)
     if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
         vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     else:
+        # If folder doesn't exist, read files once
         all_files = []
         for ext in [".docx", ".pdf", ".txt"]:
             all_files.extend(glob.glob(os.path.join(DOCS_DIR, f"**/*{ext}"), recursive=True))
@@ -66,7 +65,7 @@ def get_bot_chain(_api_key):
         vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=VECTOR_DB_DIR)
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 7}) 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, openai_api_key=_api_key)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_BEHAVIOR + "\n\nContext from curriculum:\n{context}"),
@@ -98,33 +97,20 @@ chain, llm_model = get_bot_chain(api_key)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "How does this curriculum approach the environment?", "Tell me about Ann Lewin-Benham's philosophy."]
+    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "Tell me about the Greenhouse Effect.", "How do we foster meaningful conversations?"]
 
-# Function to update suggestions based on chat
-def update_suggestions(history_text):
-    try:
-        response = llm_model.invoke([("system", SUGGESTION_PROMPT), ("human", history_text)])
-        new_list = json.loads(response.content)
-        st.session_state.suggestions = new_list
-    except:
-        pass # Fallback to existing suggestions if AI fails
-
-# --- SIDEBAR SUGGESTIONS ---
-st.sidebar.title("Deepen the Discussion")
-st.sidebar.write("Click a follow-up question:")
+# Sidebar Suggestions
+st.sidebar.title("Suggested Prompts")
 for suggestion in st.session_state.suggestions:
     if st.sidebar.button(suggestion):
-        # Trigger question as if user typed it
         st.session_state.user_query = suggestion
 
 # Display History
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# User Input
-user_input = st.chat_input("Ask a question...")
-
-# Handle sidebar button click or direct input
+# User Input Logic
+user_input = st.chat_input("Ask a question about the curriculum...")
 final_query = st.session_state.get("user_query") or user_input
 
 if final_query:
@@ -136,13 +122,21 @@ if final_query:
     history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = chain.invoke({"input": final_query, "chat_history": history})
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            
-            # Update suggestions for the NEXT turn
-            chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-2:]])
-            update_suggestions(chat_context)
+        # Typing Effect (Streaming)
+        def stream_response():
+            full_response = chain.invoke({"input": final_query, "chat_history": history})
+            for word in full_response.split(" "):
+                yield word + " "
+                time.sleep(0.04) # Speed of typing
+
+        response_text = st.write_stream(stream_response())
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
+        
+        # Adaptive suggestions update
+        try:
+            chat_context = f"User: {final_query}\nAssistant: {response_text}"
+            res = llm_model.invoke([("system", SUGGESTION_PROMPT), ("human", chat_context)])
+            st.session_state.suggestions = json.loads(res.content)
+        except: pass
             
     st.rerun()
