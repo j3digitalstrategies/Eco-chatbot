@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import glob
+import json
 from dotenv import load_dotenv
 
 # Core LangChain & AI
@@ -13,13 +14,12 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# --- 1. CONFIG & SYSTEM PROMPT ---
+# --- 1. CONFIG & SYSTEM PROMPTS ---
 load_dotenv()
 DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 
-# Safeguards and Persona
 SYSTEM_BEHAVIOR = """
 You are the Eco-Education Curriculum Assistant. Your "brain" consists of the overarching 
 Eco-Education curriculum written by Ann Lewin-Benham.
@@ -28,9 +28,15 @@ CORE RULES:
 1. Treat all documents as a single unified curriculum by Ann Lewin-Benham.
 2. If the answer is in the curriculum, prioritize that information.
 3. If the answer is NOT in the curriculum, use your general knowledge but mention it's supplementary.
-4. SAFEGUARD: Do not provide instructions on harmful activities, illegal acts, or topics 
-   that contradict environmental wellness.
-5. If a user is confused, guide them back to the big ideas of the curriculum.
+4. SAFEGUARD: Do not provide instructions on harmful activities or illegal acts.
+"""
+
+# Prompt to generate the adaptive suggestions
+SUGGESTION_PROMPT = """
+Based on the following conversation about the Eco-Education curriculum, generate 3 follow-up questions 
+that a curious educator might ask to go deeper into the topic. 
+Keep the questions concise and relevant to Ann Lewin-Benham's work.
+Return ONLY a JSON list of strings. Format: ["Question 1", "Question 2", "Question 3"]
 """
 
 # --- 2. THE ENGINE ---
@@ -38,18 +44,13 @@ CORE RULES:
 def get_bot_chain(_api_key):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
     
-    # Check if DB exists to avoid re-reading every time
     if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
         vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     else:
-        if not os.path.exists(DOCS_DIR):
-            st.error("Missing curriculum_docs folder.")
-            return None
-
         all_files = []
         for ext in [".docx", ".pdf", ".txt"]:
             all_files.extend(glob.glob(os.path.join(DOCS_DIR, f"**/*{ext}"), recursive=True))
-
+        
         documents = []
         for file_path in all_files:
             try:
@@ -81,7 +82,7 @@ def get_bot_chain(_api_key):
         }
         | prompt | llm | StrOutputParser()
     )
-    return rag_chain
+    return rag_chain, llm
 
 # --- 3. UI ---
 st.title("🌱 Eco-Education Assistant")
@@ -89,50 +90,59 @@ st.subheader("by Ann Lewin-Benham")
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
-    st.error("OpenAI API Key missing.")
+    st.error("API Key missing.")
     st.stop()
 
-# Initialize Engine
-chain = get_bot_chain(api_key)
+chain, llm_model = get_bot_chain(api_key)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "How does this curriculum approach the environment?", "Tell me about Ann Lewin-Benham's philosophy."]
 
-# --- SUGGESTED PROMPTS ---
-st.sidebar.title("Suggested Topics")
-suggestions = [
-    "What are the big ideas of this curriculum?",
-    "Tell me about the Greenhouse Effect in Chapter 12.",
-    "How does the curriculum approach evolution?",
-    "What is the 'Romance of Geology'?"
-]
+# Function to update suggestions based on chat
+def update_suggestions(history_text):
+    try:
+        response = llm_model.invoke([("system", SUGGESTION_PROMPT), ("human", history_text)])
+        new_list = json.loads(response.content)
+        st.session_state.suggestions = new_list
+    except:
+        pass # Fallback to existing suggestions if AI fails
 
-for suggestion in suggestions:
+# --- SIDEBAR SUGGESTIONS ---
+st.sidebar.title("Deepen the Discussion")
+st.sidebar.write("Click a follow-up question:")
+for suggestion in st.session_state.suggestions:
     if st.sidebar.button(suggestion):
-        st.session_state.messages.append({"role": "user", "content": suggestion})
-        history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-        with st.chat_message("assistant"):
-            # Ensure the chain is ready before invoking
-            if chain:
-                response = chain.invoke({"input": suggestion, "chat_history": history})
-                st.session_state.messages.append({"role": "assistant", "content": response})
-        st.rerun()
+        # Trigger question as if user typed it
+        st.session_state.user_query = suggestion
 
-# Display Chat History
+# Display History
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-user_input = st.chat_input("Ask a question about the curriculum...")
+# User Input
+user_input = st.chat_input("Ask a question...")
 
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"): st.markdown(user_input)
+# Handle sidebar button click or direct input
+final_query = st.session_state.get("user_query") or user_input
+
+if final_query:
+    if "user_query" in st.session_state: del st.session_state["user_query"]
+    
+    st.session_state.messages.append({"role": "user", "content": final_query})
+    with st.chat_message("user"): st.markdown(final_query)
     
     history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+    
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            if chain:
-                response = chain.invoke({"input": user_input, "chat_history": history})
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
+            response = chain.invoke({"input": final_query, "chat_history": history})
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            
+            # Update suggestions for the NEXT turn
+            chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-2:]])
+            update_suggestions(chat_context)
+            
     st.rerun()
