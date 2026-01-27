@@ -21,26 +21,48 @@ DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
 
+# Mobile Detection CSS: Only show the "mobile-tip" div if screen width < 768px
+st.markdown("""
+    <style>
+    .mobile-tip {
+        display: none;
+        background-color: #f0f2f6;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #dfe1e5;
+        margin-bottom: 20px;
+    }
+    @media (max-width: 768px) {
+        .mobile-tip {
+            display: block;
+        }
+    }
+    </style>
+    <div class="mobile-tip">
+        <b>📱 Mobile User Tip:</b> Tap the <b>></b> arrow in the top-left corner to find <b>Suggested Prompts</b>!
+    </div>
+    """, unsafe_allow_html=True)
+
 SYSTEM_BEHAVIOR = """
 You are the Eco-Education Curriculum Assistant for "Saving Planet Earth: Revolutionary Ways to Teach Eco-Education."
 You represent the pedagogical work of Ann Lewin-Benham.
 
 STRICT CLASSROOM PROTOCOL:
-1. SAFEGUARD: You must never discuss content that is sexually explicit, violent, or sensitive for young children. 
-2. REFUSAL: If asked about adult/sensitive topics, refuse politely and pivot back to the curriculum.
-3. SCOPE: Focus on the curriculum. If asked general child-safe questions, answer them through the lens of Ann Lewin-Benham's methods.
+1. SAFEGUARD: Never discuss explicit, violent, or sensitive adult content. 
+2. REFUSAL: If asked about adult topics, refuse and pivot back to the curriculum.
+3. SCOPE: Link general child-safe questions back to the curriculum strategies.
 """
 
 SUGGESTION_PROMPT = """
-Based on the discussion of Ann Lewin-Benham's Eco-Education curriculum, generate 3 child-safe "Suggested Prompts".
+Based on the discussion of Ann Lewin-Benham's curriculum, generate 3 child-safe "Suggested Prompts".
 Return ONLY a JSON list of strings. Format: ["Prompt 1", "Prompt 2", "Prompt 3"]
 """
 
 INTRO_TEXT = """Welcome! I am your AI assistant for **Saving Planet Earth: Revolutionary Ways to Teach Eco-Education**. 
 
-I am here to help you navigate Ann Lewin-Benham’s curriculum. You can ask me about specific chapters, teaching strategies for young learners, or how to foster meaningful conversations about our planet. 
+I am here to help you navigate Ann Lewin-Benham’s curriculum. You can ask me about specific chapters, teaching strategies, or fostering meaningful conversations. 
 
-Try selecting a topic from the **Suggested Prompts** on the left, or type your own question below to begin."""
+Try selecting a topic from the **Suggested Prompts**, or type your own question below to begin."""
 
 # --- 2. THE ENGINE ---
 @st.cache_resource
@@ -96,16 +118,18 @@ if not api_key:
     st.error("API Key missing.")
     st.stop()
 
-# Initialize Engine
 chain, llm_model = get_bot_chain(api_key)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # Trigger the intro sequence on first load
     st.session_state.show_intro = True
 
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "How do we teach about ecosystems?", "Tell me about Ann Lewin-Benham's philosophy."]
+    st.session_state.suggestions = [
+        "What are the big ideas of this curriculum?", 
+        "How do we teach about ecosystems?", 
+        "Tell me about Ann Lewin-Benham's philosophy."
+    ]
 
 # --- SIDEBAR: SUGGESTED PROMPTS ---
 st.sidebar.title("Suggested Prompts")
