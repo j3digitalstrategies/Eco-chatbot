@@ -7,6 +7,8 @@ import os
 import zipfile
 import chromadb
 import shutil
+import sqlite3
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -17,64 +19,101 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIGURATION ---
+# --- CONFIG ---
 load_dotenv()
-DB_DIR = "final_eco_db_instance"
+DB_DIR = "eco_final_stable_v1"
 CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
 ZIP_NAME = "chroma_db.zip"
 
 st.set_page_config(page_title="Eco-Chatbot", layout="wide", page_icon="🌱")
 
-# --- 2. FORCED INITIALIZATION ---
-@st.cache_resource
-def force_init_db():
+# --- SURGICAL SCHEMA FIX ---
+def repair_chroma_metadata(db_path):
+    """Deep fix for the KeyError: '_type' by modifying the sqlite file directly."""
+    sqlite_db = os.path.join(db_path, "chroma.sqlite3")
+    if not os.path.exists(sqlite_db):
+        return False, "sqlite3 file not found for patching"
+    
     try:
-        # 1. Clean up old attempts
-        if os.path.exists(CHROMA_PATH):
-            shutil.rmtree(CHROMA_PATH)
+        conn = sqlite3.connect(sqlite_db)
+        cursor = conn.cursor()
         
-        if not os.path.exists(ZIP_NAME):
-            return False, f"CRITICAL: {ZIP_NAME} not found in repo."
+        # We target the 'collections' table where the config JSON lives
+        cursor.execute("SELECT id, configuration_json FROM collections")
+        rows = cursor.fetchall()
+        
+        for row_id, config_json in rows:
+            if config_json:
+                config_data = json.loads(config_json)
+                # If the _type key is missing, Chroma 0.5+ will crash. We add it.
+                if "_type" not in config_data:
+                    config_data["_type"] = "CollectionConfigurationInternal"
+                    updated_json = json.dumps(config_data)
+                    cursor.execute(
+                        "UPDATE collections SET configuration_json = ? WHERE id = ?",
+                        (updated_json, row_id)
+                    )
+        
+        conn.commit()
+        conn.close()
+        return True, "Metadata patch applied successfully"
+    except Exception as e:
+        return False, f"Patching failed: {str(e)}"
 
-        # 2. Extract files
-        temp_dir = "extraction_temp"
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+# --- INITIALIZATION ---
+st.title("🌱 Eco-Education Assistant")
+
+@st.cache_resource
+def startup_sequence():
+    status_log = []
+    
+    # 1. Check for Zip
+    if not os.path.exists(ZIP_NAME):
+        return False, ["CRITICAL: chroma_db.zip missing from GitHub repo."]
+
+    # 2. Extract
+    try:
+        if os.path.exists(DB_DIR): shutil.rmtree(DB_DIR)
+        temp_extract = "temp_run"
+        if os.path.exists(temp_extract): shutil.rmtree(temp_extract)
         
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
-            z.extractall(temp_dir)
+            z.extractall(temp_extract)
+        status_log.append("✅ Files unzipped")
 
-        # 3. Find the database (handles nested folders or Mac junk)
-        sqlite_file = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
-        if not sqlite_file:
-            return False, "Could not find chroma.sqlite3 inside zip."
+        # 3. Relocate
+        sqlite_path = next(Path(temp_extract).rglob("chroma.sqlite3"), None)
+        if not sqlite_path:
+            return False, status_log + ["❌ Could not find chroma.sqlite3 in zip."]
+        
+        shutil.copytree(sqlite_path.parent, DB_DIR)
+        shutil.rmtree(temp_extract)
+        status_log.append("✅ Database moved to persistent path")
 
-        # 4. Move actual DB content to the CHROMA_PATH
-        shutil.copytree(sqlite_file.parent, CHROMA_PATH)
-        shutil.rmtree(temp_dir)
-        return True, "Database Extracted"
+        # 4. Patch
+        ok, patch_msg = repair_chroma_metadata(DB_DIR)
+        status_log.append(f"🛠 {patch_msg}")
+        
+        return True, status_log
     except Exception as e:
-        return False, f"Extraction failed: {str(e)}"
+        return False, status_log + [f"❌ Startup Error: {str(e)}"]
 
-# --- 3. UI DISPLAY ---
-st.title("🌱 Eco-Education Assistant")
-st.write("Curriculum: Ann Lewin-Benham")
+# Run the sequence
+with st.expander("System Status Logs", expanded=True):
+    success, logs = startup_sequence()
+    for log in logs:
+        st.write(log)
 
-# Check database
-ready, msg = force_init_db()
-if not ready:
-    st.error(msg)
+if not success:
+    st.error("Application failed to start. See logs above.")
     st.stop()
 
-# --- 4. ENGINE (The Fix for KeyError: '_type') ---
+# --- AI ENGINE ---
 @st.cache_resource
-def get_chain(_key):
+def get_bot_chain(_api_key):
     try:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_key)
-        
-        # We initialize the client explicitly to bypass standard LangChain validation
-        # This is the specific fix for the 'KeyError: _type'
-        settings = chromadb.Settings(allow_reset=True, anonymized_telemetry=False)
-        client = chromadb.PersistentClient(path=CHROMA_PATH, settings=settings)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
         
         vectorstore = Chroma(
             client=client,
@@ -82,10 +121,9 @@ def get_chain(_key):
             embedding_function=embeddings
         )
         
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_key)
-        
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for the Eco-Education curriculum. Use ONLY the context provided to answer. Context: {context}"),
+            ("system", "You are an assistant for the Eco-Education curriculum. Use provided context to answer. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -95,48 +133,36 @@ def get_chain(_key):
             create_stuff_documents_chain(llm, prompt)
         )
     except Exception as e:
-        st.error(f"Engine Failure: {e}")
+        st.error(f"AI Engine Error: {e}")
         return None
 
-# --- 5. CHAT SYSTEM ---
+# --- CHAT UI ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Suggestions as a single row of buttons
-st.write("### Quick Topics")
+# Suggestions
+st.write("### Suggested Topics")
 c1, c2, c3 = st.columns(3)
-if c1.button("Waste module focus?"): st.session_state.btn_q = "What is the focus of the Waste module?"
-if c2.button("Recycling approach?"): st.session_state.btn_q = "Tell me about the Recycling approach."
-if c3.button("Eco-tips?"): st.session_state.btn_q = "Give me some eco-friendly tips."
+if c1.button("Waste Module Focus", use_container_width=True): st.session_state.q = "What is the focus of the Waste module?"
+if c2.button("Recycling Approach", use_container_width=True): st.session_state.q = "Tell me about the Recycling approach."
+if c3.button("Eco-tips", use_container_width=True): st.session_state.q = "Give me some eco-friendly tips."
 
-# Show chat history
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Handle Query
-raw_input = st.chat_input("Type your question here...")
-final_q = raw_input if raw_input else st.session_state.get("btn_q")
+user_input = st.chat_input("Ask about the curriculum...")
+final_query = user_input if user_input else st.session_state.get("q")
 
-if final_q:
-    if "btn_q" in st.session_state: del st.session_state.btn_q
-    
-    st.session_state.messages.append({"role": "user", "content": final_q})
-    with st.chat_message("user"):
-        st.markdown(final_q)
+if final_query:
+    if "q" in st.session_state: del st.session_state.q
+    st.session_state.messages.append({"role": "user", "content": final_query})
+    with st.chat_message("user"): st.markdown(final_query)
 
-    # Use key from secrets
-    api_key = st.secrets["OPENAI_API_KEY"]
-    chain = get_chain(api_key)
-    
-    if chain:
-        with st.chat_message("assistant"):
-            history = [
-                HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"])
-                for m in st.session_state.messages[:-1]
-            ]
-            with st.spinner("Consulting curriculum..."):
-                response = chain.invoke({"input": final_q, "chat_history": history})
-                st.markdown(response["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
+    with st.chat_message("assistant"):
+        chain = get_bot_chain(st.secrets["OPENAI_API_KEY"])
+        history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+        with st.spinner("Reading curriculum..."):
+            response = chain.invoke({"input": final_query, "chat_history": history})
+            st.markdown(response["answer"])
+            st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
     st.rerun()
