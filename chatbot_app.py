@@ -19,33 +19,37 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
-st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
+st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
 
 SYSTEM_BEHAVIOR = """
-You are the Eco-Education Curriculum Assistant, an expert on the work of Ann Lewin-Benham.
+You are the Eco-Education Curriculum Assistant for "Saving Planet Earth: Revolutionary Ways to Teach Eco-Education."
+You represent the pedagogical work of Ann Lewin-Benham.
 
 STRICT CLASSROOM PROTOCOL:
 1. SAFEGUARD: You must never discuss content that is sexually explicit, violent, or sensitive for young children. 
-2. REFUSAL: If a user asks about adult topics, pornography, or sensitive content, you MUST refuse. 
-   - Response: "I am here to discuss the Eco-Education curriculum. Let's return to the curriculum by Ann Lewin-Benham."
-3. SCOPE: Your primary focus is the curriculum. You may answer unrelated child-safe curiosity questions but link them back to the curriculum strategies.
+2. REFUSAL: If asked about adult/sensitive topics, refuse politely and pivot back to the curriculum.
+3. SCOPE: Focus on the curriculum. If asked general child-safe questions, answer them through the lens of Ann Lewin-Benham's methods.
 """
 
 SUGGESTION_PROMPT = """
-Based on the discussion of Ann Lewin-Benham's curriculum, generate 3 child-safe follow-up "Suggested Prompts".
+Based on the discussion of Ann Lewin-Benham's Eco-Education curriculum, generate 3 child-safe "Suggested Prompts".
 Return ONLY a JSON list of strings. Format: ["Prompt 1", "Prompt 2", "Prompt 3"]
 """
+
+INTRO_TEXT = """Welcome! I am your AI assistant for **Saving Planet Earth: Revolutionary Ways to Teach Eco-Education**. 
+
+I am here to help you navigate Ann Lewin-Benham’s curriculum. You can ask me about specific chapters, teaching strategies for young learners, or how to foster meaningful conversations about our planet. 
+
+Try selecting a topic from the **Suggested Prompts** on the left, or type your own question below to begin."""
 
 # --- 2. THE ENGINE ---
 @st.cache_resource
 def get_bot_chain(_api_key):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
     
-    # Check if DB exists to bypass file reading (Speed Optimization)
     if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
         vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     else:
-        # If folder doesn't exist, read files once
         all_files = []
         for ext in [".docx", ".pdf", ".txt"]:
             all_files.extend(glob.glob(os.path.join(DOCS_DIR, f"**/*{ext}"), recursive=True))
@@ -84,7 +88,7 @@ def get_bot_chain(_api_key):
     return rag_chain, llm
 
 # --- 3. UI ---
-st.title("🌱 Eco-Education Assistant")
+st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
 st.subheader("by Ann Lewin-Benham")
 
 api_key = st.secrets.get("OPENAI_API_KEY")
@@ -92,24 +96,39 @@ if not api_key:
     st.error("API Key missing.")
     st.stop()
 
+# Initialize Engine
 chain, llm_model = get_bot_chain(api_key)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "Tell me about the Greenhouse Effect.", "How do we foster meaningful conversations?"]
+    # Trigger the intro sequence on first load
+    st.session_state.show_intro = True
 
-# Sidebar Suggestions
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "How do we teach about ecosystems?", "Tell me about Ann Lewin-Benham's philosophy."]
+
+# --- SIDEBAR: SUGGESTED PROMPTS ---
 st.sidebar.title("Suggested Prompts")
 for suggestion in st.session_state.suggestions:
     if st.sidebar.button(suggestion):
         st.session_state.user_query = suggestion
 
-# Display History
+# --- DISPLAY CHAT ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# User Input Logic
+# --- INTRO LOGIC ---
+if st.session_state.get("show_intro"):
+    with st.chat_message("assistant"):
+        def stream_intro():
+            for word in INTRO_TEXT.split(" "):
+                yield word + " "
+                time.sleep(0.03)
+        intro_response = st.write_stream(stream_intro())
+        st.session_state.messages.append({"role": "assistant", "content": intro_response})
+    st.session_state.show_intro = False
+
+# --- USER INPUT ---
 user_input = st.chat_input("Ask a question about the curriculum...")
 final_query = st.session_state.get("user_query") or user_input
 
@@ -122,12 +141,11 @@ if final_query:
     history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     
     with st.chat_message("assistant"):
-        # Typing Effect (Streaming)
         def stream_response():
             full_response = chain.invoke({"input": final_query, "chat_history": history})
             for word in full_response.split(" "):
                 yield word + " "
-                time.sleep(0.04) # Speed of typing
+                time.sleep(0.04)
 
         response_text = st.write_stream(stream_response())
         st.session_state.messages.append({"role": "assistant", "content": response_text})
