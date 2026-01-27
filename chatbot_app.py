@@ -3,16 +3,11 @@ import os
 import glob
 from dotenv import load_dotenv
 
-# LangChain Core and OpenAI
+# LangChain & OpenAI
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import (
-    DirectoryLoader, 
-    Docx2txtLoader, 
-    TextLoader, 
-    PyPDFLoader
-)
+from langchain_community.document_loaders import UnstructuredWordDocumentLoader, PyPDFLoader, TextLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnablePassthrough
@@ -30,108 +25,95 @@ def get_bot_chain(_api_key):
         st.error(f"❌ Folder '{DOCS_DIR}' not found.")
         return None
 
-    # Define loaders for different file types to avoid 'unstructured' errors
-    loaders = {
-        ".docx": Docx2txtLoader,
-        ".doc": Docx2txtLoader,
-        ".txt": TextLoader,
-        ".pdf": PyPDFLoader,
-    }
-
-    def create_loader(file_path):
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext in loaders:
-            return loaders[ext](file_path)
-        return None
-
     try:
-        with st.spinner("🌱 Reading curriculum chapters..."):
+        with st.spinner("🌱 Building the Curriculum Brain... This happens once."):
             documents = []
-            # Manually find files to ensure we see what's happening
             all_files = glob.glob(os.path.join(DOCS_DIR, "**/*.*"), recursive=True)
             
-            for file_path in all_files:
+            # Progress bar for visual feedback
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for i, file_path in enumerate(all_files):
                 ext = os.path.splitext(file_path)[1].lower()
-                if ext in loaders:
-                    try:
-                        loader = loaders[ext](file_path)
-                        documents.extend(loader.load())
-                    except Exception as e:
-                        st.warning(f"Could not load {file_path}: {e}")
+                status_text.text(f"Processing: {os.path.basename(file_path)}")
+                
+                try:
+                    if ext in [".docx", ".doc"]:
+                        loader = UnstructuredWordDocumentLoader(file_path)
+                    elif ext == ".pdf":
+                        loader = PyPDFLoader(file_path)
+                    elif ext == ".txt":
+                        loader = TextLoader(file_path)
+                    else:
+                        continue
+                    
+                    documents.extend(loader.load())
+                except Exception as e:
+                    # Silently skip files that are corrupted or unreadable
+                    continue
+                
+                progress_bar.progress((i + 1) / len(all_files))
 
             if not documents:
-                st.error("No documents were successfully loaded.")
+                st.error("Could not read any documents. Please check file formats.")
                 return None
             
-            # Split text into chunks
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            # Chunking
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
             splits = text_splitter.split_documents(documents)
             
-            # Create Vector Store
+            # Vector Store
             embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
             vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
             retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             
-            # Setup LLM
+            # LLM & Chain
             llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
-            
-            # The Prompt
             prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are an assistant for the Eco-Education curriculum. Use the provided context to answer questions accurately. Context: {context}"),
+                ("system", "You are an expert on the Eco-Education curriculum. Use the context to answer. Context: {context}"),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("human", "{input}"),
             ])
 
-            # Modern Chain Logic
             def format_docs(docs):
                 return "\n\n".join(doc.page_content for doc in docs)
 
             rag_chain = (
                 {"context": retriever | format_docs, "input": RunnablePassthrough(), "chat_history": RunnablePassthrough()}
-                | prompt
-                | llm
-                | StrOutputParser()
+                | prompt | llm | StrOutputParser()
             )
+            
+            status_text.text("✅ Brain Ready! Ask me anything.")
             return rag_chain
 
     except Exception as e:
-        st.error(f"Engine failure: {e}")
+        st.error(f"Critical Error: {e}")
         return None
 
 # --- 3. UI ---
 st.title("🌱 Eco-Education Assistant")
-st.markdown("Ask questions about the curriculum documents.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"])
 
-user_input = st.chat_input("What would you like to know about the curriculum?")
+user_input = st.chat_input("Ask about the curriculum...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    with st.chat_message("user"): st.markdown(user_input)
 
     with st.chat_message("assistant"):
         api_key = st.secrets.get("OPENAI_API_KEY")
-        if not api_key:
-            st.error("Missing OpenAI API Key in Streamlit Secrets!")
-        else:
-            chain = get_bot_chain(api_key)
-            if chain:
-                # Build history for context
-                history = [
-                    HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) 
-                    for m in st.session_state.messages[:-1]
-                ]
-                
-                with st.spinner("Searching curriculum..."):
-                    response_text = chain.invoke({"input": user_input, "chat_history": history})
-                    st.markdown(response_text)
-                    st.session_state.messages.append({"role": "assistant", "content": response_text})
+        chain = get_bot_chain(api_key)
+        
+        if chain:
+            history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+            with st.spinner("Searching..."):
+                response = chain.invoke({"input": user_input, "chat_history": history})
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
     st.rerun()
