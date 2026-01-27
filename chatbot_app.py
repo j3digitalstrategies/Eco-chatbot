@@ -21,7 +21,8 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. CONFIGURATION ---
 load_dotenv()
-DB_DIR = "eco_legacy_fix_v1"
+# Using a fresh folder name to force Streamlit to bypass any cached junk
+DB_DIR = "eco_final_stable_v3"
 CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
 ZIP_NAME = "chroma_db.zip"
 
@@ -37,31 +38,26 @@ def repair_chroma_metadata(db_path):
         conn = sqlite3.connect(sqlite_db)
         cursor = conn.cursor()
         
-        # Check if we are on a very old schema (pre-0.4.0)
+        # Check for modern collections table
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='collections';")
-        has_collections_table = cursor.fetchone()
-        
-        if has_collections_table:
-            # Modern-ish Schema Fix
+        if cursor.fetchone():
             cursor.execute("PRAGMA table_info(collections)")
             columns = [info[1] for info in cursor.fetchall()]
             
             if "configuration_json" in columns:
                 cursor.execute("SELECT id, configuration_json FROM collections")
-                for row_id, config_json in cursor.fetchall():
+                for row_id, config_json in rows := cursor.fetchall():
                     if config_json:
                         config_data = json.loads(config_json)
                         if "_type" not in config_data:
                             config_data["_type"] = "CollectionConfigurationInternal"
                             cursor.execute("UPDATE collections SET configuration_json = ? WHERE id = ?", (json.dumps(config_data), row_id))
                 conn.commit()
-                msg = "Modern schema patched."
+                msg = "Schema patched for modern Chroma."
             else:
-                msg = "Collections table exists but no configuration column. Skipping."
+                msg = "Legacy schema detected (no config column)."
         else:
-            # Legacy Schema Logic: Older versions often just need to be opened by the client
-            # to trigger internal migration, but we'll flag it here.
-            msg = "Legacy schema detected. Attempting standard connection."
+            msg = "Pre-0.4.0 legacy schema detected."
             
         conn.close()
         return True, msg
@@ -73,24 +69,32 @@ def repair_chroma_metadata(db_path):
 def startup_sequence():
     logs = []
     if not os.path.exists(ZIP_NAME):
-        return False, ["❌ Missing chroma_db.zip"]
+        return False, [f"❌ {ZIP_NAME} not found. Ensure it is in the root of your GitHub repo."]
 
     try:
+        # Check if it's actually a zip
+        with open(ZIP_NAME, 'rb') as f:
+            header = f.read(4)
+            if header != b'\x50\x4b\x03\x04':
+                f.seek(0)
+                snippet = f.read(50)
+                return False, [f"❌ File is not a zip. Header: {header}. Content: {snippet}"]
+
         if os.path.exists(DB_DIR): shutil.rmtree(DB_DIR)
-        temp_dir = "temp_extract"
+        temp_dir = "temp_extract_v3"
         if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
         
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
             z.extractall(temp_dir)
         
         sqlite_path = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
-        if not sqlite_path: return False, ["❌ No database in zip"]
+        if not sqlite_path: return False, ["❌ No chroma.sqlite3 found inside the zip."]
         
         shutil.copytree(sqlite_path.parent, DB_DIR)
         shutil.rmtree(temp_dir)
         
         ok, repair_msg = repair_chroma_metadata(DB_DIR)
-        logs.append(f"🛠 {repair_msg}")
+        logs.append(f"✅ {repair_msg}")
         return True, logs
     except Exception as e:
         return False, [f"❌ Startup Error: {e}"]
@@ -103,15 +107,14 @@ with st.expander("🔍 System Status", expanded=True):
     for log in setup_logs: st.write(log)
 
 if not success:
-    st.error("Setup failed.")
+    st.error("Application setup failed.")
     st.stop()
 
-# --- 5. ENGINE ---
+# --- 5. AI ENGINE ---
 @st.cache_resource
 def get_bot_chain(_api_key):
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
-        # We use standard Settings to allow Chroma to attempt its own migration on older files
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         
         vectorstore = Chroma(
@@ -122,7 +125,7 @@ def get_bot_chain(_api_key):
         
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for the Eco-Education curriculum. Answer using the context. Context: {context}"),
+            ("system", "You are an assistant for the Eco-Education curriculum. Answer using the context provided. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
@@ -141,9 +144,9 @@ if "messages" not in st.session_state:
 
 # Quick Buttons
 c1, c2, c3 = st.columns(3)
-if c1.button("Waste Module Focus"): st.session_state.query = "What is the focus of the Waste module?"
-if c2.button("Recycling Approach"): st.session_state.query = "Tell me about the Recycling approach."
-if c3.button("Eco-tips"): st.session_state.query = "Give me some eco-friendly tips."
+if c1.button("Waste Module Focus", use_container_width=True): st.session_state.query = "What is the focus of the Waste module?"
+if c2.button("Recycling Approach", use_container_width=True): st.session_state.query = "Tell me about the Recycling approach."
+if c3.button("Eco-tips", use_container_width=True): st.session_state.query = "Give me some eco-friendly tips."
 
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
@@ -161,7 +164,7 @@ if query:
         chain = get_bot_chain(api_key)
         if chain:
             history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-            with st.spinner("Searching..."):
+            with st.spinner("Searching curriculum..."):
                 res = chain.invoke({"input": query, "chat_history": history})
                 st.markdown(res["answer"])
                 st.session_state.messages.append({"role": "assistant", "content": res["answer"]})
