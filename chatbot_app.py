@@ -19,7 +19,7 @@ DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 
-# Restoring the Safeguards and Persona
+# Safeguards and Persona
 SYSTEM_BEHAVIOR = """
 You are the Eco-Education Curriculum Assistant. Your "brain" consists of the overarching 
 Eco-Education curriculum written by Ann Lewin-Benham.
@@ -85,7 +85,7 @@ def get_bot_chain(_api_key):
 
 # --- 3. UI ---
 st.title("🌱 Eco-Education Assistant")
-st.subheader("Knowledgeable about the entire Eco-Curriculum by Ann Lewin-Benham")
+st.subheader("by Ann Lewin-Benham")
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
@@ -112,15 +112,17 @@ for suggestion in suggestions:
         st.session_state.messages.append({"role": "user", "content": suggestion})
         history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
         with st.chat_message("assistant"):
-            response = chain.invoke({"input": suggestion, "chat_history": history})
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            # Ensure the chain is ready before invoking
+            if chain:
+                response = chain.invoke({"input": suggestion, "chat_history": history})
+                st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
 # Display Chat History
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-user_input = st.chat_input("Ask a question about the book...")
+user_input = st.chat_input("Ask a question about the curriculum...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -129,7 +131,8 @@ if user_input:
     history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = chain.invoke({"input": user_input, "chat_history": history})
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            if chain:
+                response = chain.invoke({"input": user_input, "chat_history": history})
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
     st.rerun()
