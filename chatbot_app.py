@@ -17,15 +17,15 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
-st.set_page_config(page_title="Eco-Education Assistant", layout="wide", page_icon="🌱")
+st.set_page_config(page_title="Eco-Assistant", layout="wide", page_icon="🌱")
 
 # Restoring the Safeguards and Persona
 SYSTEM_BEHAVIOR = """
-You are the Eco-Education Curriculum Assistant. Your "brain" consists of an overarching book 
-broken into several chapters and documents. 
+You are the Eco-Education Curriculum Assistant. Your "brain" consists of the overarching 
+Eco-Education curriculum written by Ann Lewin-Benham.
 
 CORE RULES:
-1. Treat all documents as a single unified curriculum.
+1. Treat all documents as a single unified curriculum by Ann Lewin-Benham.
 2. If the answer is in the curriculum, prioritize that information.
 3. If the answer is NOT in the curriculum, use your general knowledge but mention it's supplementary.
 4. SAFEGUARD: Do not provide instructions on harmful activities, illegal acts, or topics 
@@ -64,7 +64,7 @@ def get_bot_chain(_api_key):
         splits = text_splitter.split_documents(documents)
         vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=VECTOR_DB_DIR)
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 7}) # Sees 7 parts of the "book" at once
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 7}) 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, openai_api_key=_api_key)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -85,7 +85,7 @@ def get_bot_chain(_api_key):
 
 # --- 3. UI ---
 st.title("🌱 Eco-Education Assistant")
-st.markdown("Knowledgeable about the entire Eco-Curriculum.")
+st.subheader("Knowledgeable about the entire Eco-Curriculum by Ann Lewin-Benham")
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
@@ -110,7 +110,6 @@ suggestions = [
 for suggestion in suggestions:
     if st.sidebar.button(suggestion):
         st.session_state.messages.append({"role": "user", "content": suggestion})
-        # Trigger response logic
         history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
         with st.chat_message("assistant"):
             response = chain.invoke({"input": suggestion, "chat_history": history})
