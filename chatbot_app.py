@@ -21,8 +21,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # --- 1. CONFIGURATION ---
 load_dotenv()
-# Using a fresh folder name to force Streamlit to bypass any cached junk
-DB_DIR = "eco_final_stable_v3"
+DB_DIR = "eco_final_stable_v4"
 CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
 ZIP_NAME = "chroma_db.zip"
 
@@ -46,7 +45,8 @@ def repair_chroma_metadata(db_path):
             
             if "configuration_json" in columns:
                 cursor.execute("SELECT id, configuration_json FROM collections")
-                for row_id, config_json in rows := cursor.fetchall():
+                rows = cursor.fetchall() # Fixed syntax here
+                for row_id, config_json in rows:
                     if config_json:
                         config_data = json.loads(config_json)
                         if "_type" not in config_data:
@@ -78,10 +78,10 @@ def startup_sequence():
             if header != b'\x50\x4b\x03\x04':
                 f.seek(0)
                 snippet = f.read(50)
-                return False, [f"❌ File is not a zip. Header: {header}. Content: {snippet}"]
+                return False, [f"❌ File is not a zip. Header: {header}. Content snippet: {snippet}"]
 
         if os.path.exists(DB_DIR): shutil.rmtree(DB_DIR)
-        temp_dir = "temp_extract_v3"
+        temp_dir = "temp_extract_v4"
         if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
         
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
