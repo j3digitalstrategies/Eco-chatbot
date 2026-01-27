@@ -19,153 +19,100 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
-# --- 1. CONFIGURATION ---
+# --- CONFIG ---
 load_dotenv()
-DB_DIR = "eco_db_final_v6"
-CHROMA_PATH = os.path.join(os.getcwd(), DB_DIR)
+DB_DIR = "eco_db_v7"
 ZIP_NAME = "chroma_db.zip"
-
 st.set_page_config(page_title="Eco-Chatbot", layout="wide", page_icon="🌱")
 
-# --- 2. THE SCHEMA FIXER (The "Secret Sauce") ---
-def force_migrate_schema(db_path):
+# --- SCHEMA REPAIR ---
+def patch_database(db_path):
     sqlite_db = os.path.join(db_path, "chroma.sqlite3")
-    if not os.path.exists(sqlite_db):
-        return False, "Database file not found."
-    
+    if not os.path.exists(sqlite_db): return False, "No sqlite3 file."
     try:
         conn = sqlite3.connect(sqlite_db)
         cursor = conn.cursor()
-        
-        # Check if 'collections' table exists
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='collections';")
         if cursor.fetchone():
-            # Check for the configuration column
-            cursor.execute("PRAGMA table_info(collections)")
-            cols = [c[1] for c in cursor.fetchall()]
-            
-            if "configuration_json" in cols:
-                cursor.execute("SELECT id, configuration_json FROM collections")
-                rows = cursor.fetchall()
-                for row_id, config_json in rows:
-                    if config_json:
-                        data = json.loads(config_json)
-                        if "_type" not in data:
-                            data["_type"] = "CollectionConfigurationInternal"
-                            cursor.execute("UPDATE collections SET configuration_json = ? WHERE id = ?", (json.dumps(data), row_id))
-                conn.commit()
-                msg = "Schema successfully patched."
-            else:
-                msg = "Legacy schema detected (v0.3.x); attempting standard load."
-        else:
-            msg = "Pre-collections schema; attempting load."
-            
+            cursor.execute("SELECT id, configuration_json FROM collections")
+            for row_id, config_json in cursor.fetchall():
+                if config_json and "_type" not in json.loads(config_json):
+                    data = json.loads(config_json)
+                    data["_type"] = "CollectionConfigurationInternal"
+                    cursor.execute("UPDATE collections SET configuration_json = ? WHERE id = ?", (json.dumps(data), row_id))
+            conn.commit()
         conn.close()
-        return True, msg
+        return True, "Database patched."
     except Exception as e:
-        return False, f"Patch failed: {str(e)}"
+        return False, str(e)
 
-# --- 3. STARTUP & EXTRACTION ---
+# --- STARTUP ---
 @st.cache_resource
-def startup_sequence():
-    logs = []
+def startup():
     if not os.path.exists(ZIP_NAME):
-        return False, [f"❌ Error: {ZIP_NAME} not found in repository root."]
+        return False, f"Missing {ZIP_NAME} in GitHub."
+    
+    # CHECK FOR GIT LFS POINTER
+    with open(ZIP_NAME, 'rb') as f:
+        chunk = f.read(100)
+        if b"version https://git-lfs" in chunk:
+            return False, "⚠️ GITHUB ERROR: Your 'chroma_db.zip' is an LFS pointer. Please delete it from GitHub and re-upload it manually via the 'Upload files' button in your browser to fix this."
 
     try:
-        # 1. Clean old attempts
         if os.path.exists(DB_DIR): shutil.rmtree(DB_DIR)
-        temp_dir = "temp_v6"
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-        
-        # 2. Extract
         with zipfile.ZipFile(ZIP_NAME, 'r') as z:
-            z.extractall(temp_dir)
+            z.extractall("temp_v7")
         
-        # 3. Find and Move
-        target = next(Path(temp_dir).rglob("chroma.sqlite3"), None)
-        if not target: return False, ["❌ Error: No chroma.sqlite3 found inside zip."]
+        target = next(Path("temp_v7").rglob("chroma.sqlite3"), None)
+        if not target: return False, "Zip is empty or invalid."
         
         shutil.copytree(target.parent, DB_DIR)
-        shutil.rmtree(temp_dir)
-        
-        # 4. Patch
-        ok, patch_msg = force_migrate_schema(DB_DIR)
-        logs.append(f"✅ {patch_msg}")
-        return True, logs
+        shutil.rmtree("temp_v7")
+        patch_database(DB_DIR)
+        return True, "Ready!"
     except Exception as e:
-        return False, [f"❌ Startup Error: {e}"]
+        return False, f"Extraction failed: {e}"
 
-# --- 4. UI ---
+# --- UI ---
 st.title("🌱 Eco-Education Assistant")
 
-with st.expander("🔍 System Diagnostic", expanded=True):
-    success, setup_logs = startup_sequence()
-    for log in setup_logs: st.write(log)
-
+success, status_msg = startup()
 if not success:
-    st.error("System could not start. Check the logs above.")
+    st.error(status_msg)
+    st.info("💡 **How to fix this:** Go to your GitHub repo, delete 'chroma_db.zip', click 'Add file' -> 'Upload files', and upload the zip directly. Do not use 'git push' for the zip file.")
     st.stop()
 
-# --- 5. AI ENGINE ---
+# --- ENGINE ---
 @st.cache_resource
-def get_bot_chain(_api_key):
+def get_chain(_api_key):
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
-        
-        # Use simple settings to allow internal migration
-        client = chromadb.PersistentClient(path=CHROMA_PATH)
-        
-        vectorstore = Chroma(
-            client=client,
-            collection_name="langchain",
-            embedding_function=embeddings
-        )
-        
+        vectorstore = Chroma(persist_directory=DB_DIR, embedding_function=embeddings, collection_name="langchain")
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an assistant for the Eco-Education curriculum. Answer questions based on the context. Context: {context}"),
+            ("system", "Use the context to answer. Context: {context}"),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
         ])
-        
-        return create_retrieval_chain(
-            vectorstore.as_retriever(search_kwargs={"k": 3}),
-            create_stuff_documents_chain(llm, prompt)
-        )
+        return create_retrieval_chain(vectorstore.as_retriever(), create_stuff_documents_chain(llm, prompt))
     except Exception as e:
-        st.error(f"Engine initialization failed: {e}")
+        st.error(f"Engine failure: {e}")
         return None
 
-# --- 6. CHAT INTERFACE ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Quick Access Buttons
-cols = st.columns(3)
-if cols[0].button("Waste Module Focus"): st.session_state.query = "What is the focus of the Waste module?"
-if cols[1].button("Recycling Approach"): st.session_state.query = "Tell me about the Recycling approach."
-if cols[2].button("Eco-tips"): st.session_state.query = "Give me some eco-friendly tips."
-
+# --- CHAT ---
+if "messages" not in st.session_state: st.session_state.messages = []
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-user_input = st.chat_input("Ask about the curriculum...")
-query = user_input if user_input else st.session_state.get("query")
-
+query = st.chat_input("Ask a question...")
 if query:
-    if "query" in st.session_state: del st.session_state.query
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
-
-    with st.chat_message("assistant"):
-        chain = get_bot_chain(st.secrets["OPENAI_API_KEY"])
-        if chain:
-            history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-            with st.spinner("Analyzing curriculum..."):
-                response = chain.invoke({"input": query, "chat_history": history})
-                st.markdown(response["answer"])
-                st.session_state.messages.append({"role": "assistant", "content": response["answer"]})
-        else:
-            st.error("The AI engine failed to load. Please check System Diagnostics.")
-    st.rerun()
+    
+    chain = get_chain(st.secrets["OPENAI_API_KEY"])
+    if chain:
+        history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+        with st.spinner("Thinking..."):
+            res = chain.invoke({"input": query, "chat_history": history})
+            st.chat_message("assistant").markdown(res["answer"])
+            st.session_state.messages.append({"role": "assistant", "content": res["answer"]})
