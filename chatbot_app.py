@@ -55,7 +55,7 @@ if "step" not in st.session_state: st.session_state.step = "zip"
 if "profile" not in st.session_state: 
     st.session_state.profile = {"zip": None, "role": None, "age": None, "season": datetime.now().strftime("%B")}
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What are the big ideas?", "Tell me about ecosystems.", "Ann Lewin-Benham's philosophy."]
+    st.session_state.suggestions = ["What makes moss bouncy?", "How does moss help trees?", "Where can we find more moss?"]
 
 # --- 4. UI SETUP ---
 st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
@@ -93,31 +93,32 @@ if st.session_state.step != "complete":
 # --- 6. SOCRATIC SYSTEM BEHAVIOR ---
 p = st.session_state.profile
 role_context = {
-    "Teacher": "Focus on pedagogy and implementation.",
-    "Parent": "Focus on interactive play and fostering child curiosity.",
-    "Student": f"Speak to a {p['age']}-year-old. Use short sentences and exciting analogies.",
-    "Other": "Provide clear curriculum summaries."
+    "Teacher": "Provide pedagogical frameworks and classroom-ready prompts.",
+    "Parent": "Act as a co-explorer. Focus on sparking conversation between parent and child.",
+    "Student": f"Speak as a mentor to a {p['age']}-year-old. Use clear, vivid, and simple language.",
+    "Other": "Provide accessible summaries of the Eco-Education philosophy."
 }
 
 SYSTEM_BEHAVIOR = f"""
-You are a Socratic Eco-Education Mentor for Ann Lewin-Benham's curriculum.
+You are a Socratic Eco-Education Mentor based on Ann Lewin-Benham's work.
 USER: {p['role']}, Age: {p['age']}, Zip: {p['zip']}, Month: {p['season']}.
 
-CORE DIRECTIVE: DO NOT give long lists or 5-step plans immediately.
-1. INTERACT: Start with a brief, fascinating fact from the text about the user's topic.
-2. ITERATE: Ask 1-2 clarifying questions to narrow down the activity (e.g., 'What color was the moss?' or 'Is it in a sunny or shady spot?').
-3. GUIDED EXPLORATION: Encourage the user to observe first. Only provide a full activity once you have enough context to make it personalized.
-4. TONE: {role_context.get(p['role'])}. Always link back to Ann Lewin-Benham's philosophy of 'Meaning-FULL Conversation'.
+CONVERSATIONAL PROTOCOL:
+1. NO DUMPING: Never provide a full list of activities or long explanations in the first response.
+2. OBSERVE & PROMPT: Use the user's descriptions (e.g., 'stringy', 'bouncy') to explain a specific concept from the curriculum. 
+3. MEANING-FULL CONVERSATION: End your response with 1-2 questions for the user to ask their child, or questions to help you narrow down the next step.
+4. TONE: {role_context.get(p['role'])}. Be warm, curious, and grounded in the text.
 """
 
 # --- 7. SIDEBAR (RESET AT BOTTOM) ---
 with st.sidebar:
     st.title("Suggested Prompts")
+    st.caption("Click a prompt to ask the chatbot:")
     for s in st.session_state.suggestions:
         if st.button(s): st.session_state.user_query = s
     
     # Push the Reset button to the bottom
-    for _ in range(20): st.write("") 
+    for _ in range(15): st.write("") 
     st.divider()
     if st.button("🔄 Reset Profile"):
         st.session_state.step = "zip"; st.session_state.messages = []; st.rerun()
@@ -144,7 +145,7 @@ if not st.session_state.messages:
         intro = f"Welcome! I'm ready to explore with a **{p['role']}** in Zip Code **{p['zip']}**. What have you observed in nature today?"
         st.markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
-user_input = st.chat_input("Ask a question...")
+user_input = st.chat_input("Type your observation or question here...")
 final_query = st.session_state.get("user_query") or user_input
 
 if final_query:
@@ -152,8 +153,14 @@ if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
-    history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+    history = [HumanMessage(content=m["content"]) if m["role"] == "user()"] else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     
+    # FIXED: Re-enforced proper list comprehension for history
+    history = []
+    for m in st.session_state.messages[:-1]:
+        if m["role"] == "user": history.append(HumanMessage(content=m["content"]))
+        else: history.append(AIMessage(content=m["content"]))
+
     with st.chat_message("assistant"):
         def stream_response():
             full_response = rag_chain.invoke({"input": final_query, "chat_history": history})
@@ -162,9 +169,14 @@ if final_query:
         res_text = st.write_stream(stream_response())
         st.session_state.messages.append({"role": "assistant", "content": res_text})
         
-        # Adaptive suggestions based on Socratic flow
+        # IMPROVED SUGGESTION LOGIC: Ensure prompts are from the USER'S perspective
         try:
-            suggest_p = f"Generate 3 short follow-up questions for a {p['role']} regarding this topic. Return ONLY a JSON list."
+            suggest_p = f"""
+            Based on the current conversation about {final_query}, generate 3 short prompts. 
+            These must be questions the USER (a {p['role']}) would ask the CHATBOT.
+            Examples: "How do I explain moss spores to a child?" or "What activity can we do with stringy moss?"
+            Return ONLY a JSON list of strings.
+            """
             res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
             st.session_state.suggestions = json.loads(res.content)
         except Exception: pass
