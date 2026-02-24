@@ -103,16 +103,15 @@ You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
 PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, Zip={p['zip']}.
 
 STRICT RULES:
-1. BREVITY: Max 2 paragraphs. No "That's wonderful" or filler.
-2. ROLE ISOLATION: If Student, speak to the user as the explorer. Never mention "teaching" or "your child."
-3. PARENT/TEACHER: Suggest activities and Socratic questions to use with students.
-4. VOCAB: Bold curriculum terms. Define only academic terms for Adults, and most scientific terms for Students.
+1. BREVITY: Max 2 paragraphs. No "fluff" or "that's wonderful" phrases.
+2. AGE GUARD: If kid_age is 'Unknown' and you mention an activity for a child, you MUST ask for the child's age first.
+3. ROLE ISOLATION: If Student, speak to the user as the explorer. If Parent/Teacher, act as a coach.
+4. VOCAB: Only include complex curriculum terms (e.g., Biophilia, Taxonomy) for Adults. Exclude common words like 'moss'. Definitions must be clean strings, NO JSON objects.
 """
 
 # --- 8. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
-    st.markdown("---")
     for s in st.session_state.suggestions:
         if st.button(s, use_container_width=True): 
             st.session_state.user_query = s
@@ -127,10 +126,7 @@ with st.sidebar:
     for _ in range(5): st.write("") 
     st.divider()
     if st.button("🔄 Reset User Profile"):
-        # Clear everything but keep the API key logic intact
-        for key in list(st.session_state.keys()): 
-            if key not in ["suggestions", "power_words"]: del st.session_state[key]
-        st.session_state.step = "zip"
+        for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
 # --- 9. CHAT ENGINE ---
@@ -162,12 +158,17 @@ query = st.session_state.get("user_query") or user_input
 if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # ROLE SWITCHER - Immediate Reset of Prompts to Defaults
+    # Check for Role Switch
     for r_key, r_val in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
         if f"switch to {r_key}" in query.lower() or f"i am a {r_key}" in query.lower():
             st.session_state.profile["role"] = r_val
             st.session_state.suggestions = DEFAULT_PROMPTS[r_val]
             st.session_state.power_words = {}
+
+    # Extract Kid Age
+    nums = re.findall(r'\d+', query)
+    if nums and any(w in query.lower() for w in ["year", "age", "is"]): 
+        st.session_state.profile["kid_age"] = nums[0]
 
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
@@ -186,20 +187,17 @@ if query:
         
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         
-        # DYNAMIC UPDATES - Regenerate based on the LATEST interaction
+        # DYNAMIC UPDATES
         try:
             update_p = f"""
-            Analyze this response: '{full_res}'.
-            1. Suggest 3 short USER questions for a {p['role']} based ONLY on this last response.
-            2. Extract vocab definitions: High-level/Academic for Parents/Teachers, Scientific for Students.
+            Analyze response: '{full_res}'.
+            1. Suggest 3 USER questions for a {p['role']}. If kid_age is unknown and child was mentioned, #1 MUST be "How old is my child?".
+            2. Extract curriculum vocab (Parent: complex only, Student: scientific). Return ONLY a clean string definition.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(u_res.content)
-            
-            # Update suggestions dynamically for the NEXT turn
             st.session_state.suggestions = data.get("prompts", [])
             st.session_state.power_words.update(data.get("vocab", {}))
-        except:
-            pass
+        except: pass
     st.rerun()
