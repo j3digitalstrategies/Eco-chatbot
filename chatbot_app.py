@@ -63,15 +63,13 @@ if "suggestions" not in st.session_state:
     st.session_state.suggestions = DEFAULT_PROMPTS["Other"]
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
-# --- 5. UI SETUP ---
+# --- 5. UI ---
 st.title("Saving Planet Earth: Eco-Education Assistant")
 api_key = st.secrets.get("OPENAI_API_KEY")
-if not api_key:
-    st.error("API Key missing."); st.stop()
+if not api_key: st.error("API Key missing."); st.stop()
 
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 6. ONBOARDING ---
 if st.session_state.step != "complete":
     with st.container():
         st.info("🌱 **Quick Personalization**")
@@ -91,29 +89,28 @@ if st.session_state.step != "complete":
                     st.session_state.step = "complete" if r != "Student" else "age"
                     st.rerun()
         elif st.session_state.step == "age":
-            age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=14)
+            age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=6)
             if st.button("Finish"):
                 st.session_state.profile["age"] = age_in; st.session_state.step = "complete"; st.rerun()
     st.stop()
 
-# --- 7. BEHAVIOR ---
+# --- 6. BEHAVIOR ---
 p = st.session_state.profile
 SYSTEM_BEHAVIOR = f"""
 You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
-PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, Zip={p['zip']}.
+CURRENT PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}.
 
-STRICT RULES:
-1. BREVITY: Max 2 paragraphs. No "That's wonderful" fluff.
-2. AGE-CHECK: If Role is Parent and KidAge is 'Unknown', you MUST ask the user for the child's age before giving any specific teaching advice.
-3. ROLE ISOLATION: Students are explorers. Parents/Teachers are coaches.
-4. TIERED VOCAB: 
-   - ADULTS: Include only curriculum theory or advanced science (e.g. Biophilia). Exclude basic words like 'Conservation' or 'Ecosystem'.
-   - TEEN STUDENTS (13-18): Include advanced ecological terms.
-   - YOUNG STUDENTS (<13): Include foundational terms. 
-   - ALWAYS return clean strings, never dictionaries.
+STRICT TONE RULES:
+1. BREVITY: Max 2 paragraphs. No filler.
+2. AGE-APPROPRIATE LANGUAGE: 
+   - If user is a Student (Age {p['age']}), you MUST use words a child of that age understands. 
+   - For a 6-year-old: Use simple, relatable words (e.g., 'neighbors' instead of 'community', 'home' instead of 'habitat').
+   - For a Parent/Teacher talking about a child: The activities you suggest must match the child's age. 
+3. AGE GUARD: If Role=Parent and KidAge='Unknown', ask for the age before giving activity advice.
+4. ROLE ISOLATION: Students are explorers. Adults are coaches.
 """
 
-# --- 8. SIDEBAR ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
     for s in st.session_state.suggestions:
@@ -125,7 +122,8 @@ with st.sidebar:
         st.divider()
         st.subheader("📚 Power Words")
         for word, defn in st.session_state.power_words.items():
-            st.markdown(f"**{word}**: {defn}")
+            if isinstance(defn, str):
+                st.markdown(f"**{word}**: {defn}")
 
     for _ in range(5): st.write("") 
     st.divider()
@@ -133,7 +131,7 @@ with st.sidebar:
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
-# --- 9. CHAT ENGINE ---
+# --- 8. CHAT ENGINE ---
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"),
     MessagesPlaceholder(variable_name="chat_history"),
@@ -146,7 +144,7 @@ rag_chain = (
     | prompt_template | llm_model | StrOutputParser()
 )
 
-# --- 10. DISPLAY ---
+# --- 9. DISPLAY & INPUT ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
@@ -155,24 +153,23 @@ if not st.session_state.messages:
     with st.chat_message("assistant"): st.markdown(intro)
     st.session_state.messages.append({"role": "assistant", "content": intro})
 
-# --- 11. INPUT & DYNAMIC LOGIC ---
 user_input = st.chat_input("Type here...")
 query = st.session_state.get("user_query") or user_input
 
 if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # Role Switch
+    # Check for Role Switch & Age Extraction
     for r_key, r_val in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
         if f"switch to {r_key}" in query.lower() or f"i am a {r_key}" in query.lower():
             st.session_state.profile["role"] = r_val
             st.session_state.suggestions = DEFAULT_PROMPTS[r_val]
             st.session_state.power_words = {}
-
-    # Extract Kid Age
+    
     nums = re.findall(r'\d+', query)
     if nums and any(w in query.lower() for w in ["year", "age", "is"]): 
-        st.session_state.profile["kid_age"] = int(nums[0])
+        if p['role'] == "Student": st.session_state.profile["age"] = int(nums[0])
+        else: st.session_state.profile["kid_age"] = int(nums[0])
 
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
@@ -180,30 +177,27 @@ if query:
     history = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
 
     with st.chat_message("assistant"):
-        res_container = st.empty()
         full_res = rag_chain.invoke({"input": query, "chat_history": history})
-        
-        typed_res = ""
-        for word in full_res.split(" "):
-            typed_res += word + " "
-            res_container.markdown(typed_res)
-            time.sleep(0.01)
-        
+        st.markdown(full_res)
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         
-        # DYNAMIC UPDATES
+        # DYNAMIC VOCAB & PROMPTS
+        target_age = p['age'] if p['role'] == "Student" else p['kid_age']
         try:
             update_p = f"""
-            Analyze response: '{full_res}'.
-            1. Suggest 3 short user questions for a {p['role']} based on the last response.
-            2. Extract vocab. RULES:
-               - Parent/Teacher/Adult: ONLY curriculum theory or high-level science. NO basic words like 'Conservation'.
-               - Student Age {p['age'] or p['kid_age'] or 12}: Age-appropriate scientific terms.
+            Analyze response: '{full_res}'. Target User/Child Age: {target_age or 'Unknown'}.
+            1. Suggest 3 short user questions for role: {p['role']}. 
+            2. VOCAB RULES:
+               - If Role is Adult ({p['role']}): ONLY include high-level pedagogical or curriculum theory terms.
+               - If Role is Student or regarding a Child (Age {target_age or 12}): Select 1-2 words from the response that are "stretch" words for this specific age.
+               - Definitions MUST be a simple string.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
-            st.session_state.power_words.update(data.get("vocab", {}))
+            
+            clean_vocab = {{k: v for k, v in data.get("vocab", {}).items() if isinstance(v, str)}}
+            st.session_state.power_words.update(clean_vocab)
         except: pass
     st.rerun()
