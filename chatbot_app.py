@@ -174,7 +174,7 @@ if st.sidebar.button("🔄 Reset Profile"):
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Intro sequence upon completing profile
+# Intro sequence
 if not st.session_state.messages:
     with st.chat_message("assistant"):
         intro_msg = f"Welcome! I have personalized my responses for a **{p['role']}** in Zip Code **{p['zip']}**. How can I help you explore the curriculum today?"
@@ -190,4 +190,27 @@ if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
-    history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m
+    # Reconstructed history logic with closed brackets/parentheses
+    history = [
+        HumanMessage(content=m["content"]) if m["role"] == "user" 
+        else AIMessage(content=m["content"]) 
+        for m in st.session_state.messages[:-1]
+    ]
+    
+    with st.chat_message("assistant"):
+        def stream_response():
+            full_response = rag_chain.invoke({"input": final_query, "chat_history": history})
+            for word in full_response.split(" "):
+                yield word + " "
+                time.sleep(0.04)
+        res_text = st.write_stream(stream_response())
+        st.session_state.messages.append({"role": "assistant", "content": res_text})
+        
+        # Adaptive suggestions
+        try:
+            suggest_p = f"Based on this topic for a {p['role']}, generate 3 follow-up prompts. Return ONLY a JSON list of strings."
+            res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
+            st.session_state.suggestions = json.loads(res.content)
+        except Exception: 
+            pass 
+    st.rerun()
