@@ -117,7 +117,7 @@ with st.sidebar:
     for s in st.session_state.suggestions:
         if st.button(s): st.session_state.user_query = s
     
-    # Push the Reset button to the bottom
+    # Push the Reset button to the bottom using empty space
     for _ in range(15): st.write("") 
     st.divider()
     if st.button("🔄 Reset Profile"):
@@ -153,13 +153,13 @@ if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
-    history = [HumanMessage(content=m["content"]) if m["role"] == "user()"] else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-    
-    # FIXED: Re-enforced proper list comprehension for history
+    # FIXED: Reconstructed history logic with clean list comprehension
     history = []
     for m in st.session_state.messages[:-1]:
-        if m["role"] == "user": history.append(HumanMessage(content=m["content"]))
-        else: history.append(AIMessage(content=m["content"]))
+        if m["role"] == "user":
+            history.append(HumanMessage(content=m["content"]))
+        else:
+            history.append(AIMessage(content=m["content"]))
 
     with st.chat_message("assistant"):
         def stream_response():
@@ -169,15 +169,18 @@ if final_query:
         res_text = st.write_stream(stream_response())
         st.session_state.messages.append({"role": "assistant", "content": res_text})
         
-        # IMPROVED SUGGESTION LOGIC: Ensure prompts are from the USER'S perspective
+        # IMPROVED SUGGESTION LOGIC: Force prompt to be from User's perspective
         try:
             suggest_p = f"""
-            Based on the current conversation about {final_query}, generate 3 short prompts. 
-            These must be questions the USER (a {p['role']}) would ask the CHATBOT.
-            Examples: "How do I explain moss spores to a child?" or "What activity can we do with stringy moss?"
+            Based on the current topic ({final_query}), generate 3 short prompts. 
+            These MUST be questions the USER (a {p['role']}) would ask the CHATBOT.
+            Do NOT ask about the user's child's interest. 
+            Instead, suggest questions like: "What is moss made of?" or "Give me a simple moss activity."
             Return ONLY a JSON list of strings.
             """
             res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
             st.session_state.suggestions = json.loads(res.content)
-        except Exception: pass
+        except Exception: 
+            st.session_state.suggestions = ["Tell me more about this.", "What is a good next step?", "Explain this simply."]
+            
     st.rerun()
