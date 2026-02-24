@@ -75,7 +75,7 @@ if "step" not in st.session_state: st.session_state.step = "zip"
 if "profile" not in st.session_state: 
     st.session_state.profile = {"zip": None, "role": None, "age": None, "season": datetime.now().strftime("%B")}
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What are the big ideas?", "Tell me about ecosystems.", "Ann Lewin-Benham's philosophy."]
+    st.session_state.suggestions = ["What are the big ideas of this curriculum?", "Tell me about ecosystems.", "Ann Lewin-Benham's philosophy."]
 
 # --- 4. UI HEADERS ---
 st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
@@ -90,9 +90,11 @@ retriever, llm_model = get_bot_chain(api_key)
 
 # --- 5. ONBOARDING WIZARD ---
 if st.session_state.step != "complete":
-    with st.expander("🌱 Personalizing your Experience", expanded=True):
+    with st.container():
+        st.info("🌱 **Let's personalize your experience.**")
+        
         if st.session_state.step == "zip":
-            zip_in = st.text_input("To tailor activities to your local season, please enter your Zip Code:")
+            zip_in = st.text_input("Please enter your Zip Code (to tailor activities to your local season):")
             if st.button("Next") and zip_in:
                 st.session_state.profile["zip"] = zip_in
                 st.session_state.step = "role"
@@ -101,10 +103,22 @@ if st.session_state.step != "complete":
         elif st.session_state.step == "role":
             st.write("Are you a:")
             col1, col2, col3, col4 = st.columns(4)
-            if col1.button("Teacher"): st.session_state.profile["role"] = "Teacher"; st.session_state.step = "complete"; st.rerun()
-            if col2.button("Parent"): st.session_state.profile["role"] = "Parent"; st.session_state.step = "complete"; st.rerun()
-            if col3.button("Student"): st.session_state.profile["role"] = "Student"; st.session_state.step = "age"; st.rerun()
-            if col4.button("Other"): st.session_state.profile["role"] = "Other"; st.session_state.step = "complete"; st.rerun()
+            if col1.button("Teacher"): 
+                st.session_state.profile["role"] = "Teacher"
+                st.session_state.step = "complete"
+                st.rerun()
+            if col2.button("Parent"): 
+                st.session_state.profile["role"] = "Parent"
+                st.session_state.step = "complete"
+                st.rerun()
+            if col3.button("Student"): 
+                st.session_state.profile["role"] = "Student"
+                st.session_state.step = "age"
+                st.rerun()
+            if col4.button("Other"): 
+                st.session_state.profile["role"] = "Other"
+                st.session_state.step = "complete"
+                st.rerun()
 
         elif st.session_state.step == "age":
             age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=12)
@@ -112,31 +126,31 @@ if st.session_state.step != "complete":
                 st.session_state.profile["age"] = age_in
                 st.session_state.step = "complete"
                 st.rerun()
-    st.stop() # Prevent chat until setup is done
+    st.stop() 
 
 # --- 6. PERSONALIZED SYSTEM PROMPT ---
 p = st.session_state.profile
 role_context = {
-    "Teacher": "Focus on classroom implementation, pedagogy, and curriculum mapping.",
-    "Parent": "Focus on home-based activities, simple explanations, and fostering curiosity.",
-    "Student": f"Adjust verbiage to a {p['age']}-year-old level. Use relatable examples.",
-    "Other": "Provide clear, professional summaries of the curriculum."
+    "Teacher": "Focus on classroom implementation, pedagogical theory, and curriculum mapping.",
+    "Parent": "Focus on home-based activities, simple explanations for kids, and fostering curiosity.",
+    "Student": f"Adjust ALL verbiage to be age-appropriate for a {p['age']}-year-old. Use relatable analogies.",
+    "Other": "Provide clear, professional, and accessible summaries of the curriculum."
 }
 
 SYSTEM_BEHAVIOR = f"""
-You are the Eco-Education Curriculum Assistant for Ann Lewin-Benham. 
+You are the Eco-Education Assistant for Ann Lewin-Benham's curriculum. 
 USER PROFILE: Role: {p['role']}, Age: {p['age']}, Zip Code: {p['zip']}, Current Month: {p['season']}.
 
 INSTRUCTIONS:
-1. PIVOT: Tailor activities to the user's location/zip code and the current season ({p['season']}). 
-2. TONE: {role_context.get(p['role'])}
-3. RULES: Only use child-safe content. Treat documents as a unified curriculum.
-4. REFUSAL: Politley refuse adult/sensitive topics and return to the curriculum.
+1. PIVOT: Always consider the user's location and the current season ({p['season']}) when suggesting outdoor activities.
+2. TONE & SCOPE: {role_context.get(p['role'])}
+3. RULES: Only child-safe content. Treat documents as a unified curriculum.
+4. REFUSAL: Refuse adult/sensitive topics politely and return to the curriculum.
 """
 
-# --- 7. CHAT LOGIC ---
+# --- 7. CHAT ENGINE SETUP ---
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"),
+    ("system", SYSTEM_BEHAVIOR + "\n\nContext from curriculum documents:\n{context}"),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
 ])
@@ -147,7 +161,7 @@ rag_chain = (
     | prompt_template | llm_model | StrOutputParser()
 )
 
-# Sidebar
+# --- 8. SIDEBAR & DISPLAY ---
 st.sidebar.title("Suggested Prompts")
 for s in st.session_state.suggestions:
     if st.sidebar.button(s): st.session_state.user_query = s
@@ -157,18 +171,18 @@ if st.sidebar.button("🔄 Reset Profile"):
     st.session_state.messages = []
     st.rerun()
 
-# Display
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# Intro for first-time completion
+# Intro sequence upon completing profile
 if not st.session_state.messages:
     with st.chat_message("assistant"):
-        intro = f"Welcome! I've personalized my brain for a {p['role']} in Zip Code {p['zip']}. How can I help you explore the curriculum today?"
-        st.markdown(intro)
-        st.session_state.messages.append({"role": "assistant", "content": intro})
+        intro_msg = f"Welcome! I have personalized my responses for a **{p['role']}** in Zip Code **{p['zip']}**. How can I help you explore the curriculum today?"
+        st.markdown(intro_msg)
+        st.session_state.messages.append({"role": "assistant", "content": intro_msg})
 
-user_input = st.chat_input("Ask a question...")
+# --- 9. USER INPUT HANDLING ---
+user_input = st.chat_input("Ask a question about the curriculum...")
 final_query = st.session_state.get("user_query") or user_input
 
 if final_query:
@@ -176,20 +190,4 @@ if final_query:
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
-    history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-    
-    with st.chat_message("assistant"):
-        def stream_response():
-            full_response = rag_chain.invoke({"input": final_query, "chat_history": history})
-            for word in full_response.split(" "):
-                yield word + " "
-                time.sleep(0.04)
-        res_text = st.write_stream(stream_response())
-        st.session_state.messages.append({"role": "assistant", "content": res_text})
-        
-        # Adaptive suggestions
-        try:
-            suggest_p = "Generate 3 follow-up prompts for this user role and topic. Return JSON list."
-            res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
-            st.session_state.suggestions = json.loads(res.content)
-        except
+    history = [HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m
