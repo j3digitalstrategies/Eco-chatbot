@@ -3,6 +3,7 @@ import os
 import glob
 import json
 import time
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Core LangChain & AI
@@ -21,63 +22,36 @@ DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
 
-# FIXED MOBILE TIP: Theme-aware colors
+# Theme-aware Mobile Tip
 st.markdown("""
     <style>
     .mobile-tip {
         display: none;
-        background-color: rgba(128, 128, 128, 0.1); /* Transparent gray that works on any background */
-        color: inherit; /* Takes the theme's text color */
+        background-color: rgba(128, 128, 128, 0.1);
+        color: inherit;
         padding: 15px;
         border-radius: 10px;
-        border: 1px solid #2e7d32; /* Eco-green border */
+        border: 1px solid #2e7d32;
         margin-bottom: 20px;
         text-align: center;
     }
-    @media (max-width: 768px) {
-        .mobile-tip {
-            display: block;
-        }
-    }
+    @media (max-width: 768px) { .mobile-tip { display: block; } }
     </style>
     <div class="mobile-tip">
-        <b>📱 Mobile User Tip:</b> Tap the <b>>></b> arrow in the top-left corner to find your <b>Suggested Prompts</b>!
+        <b>📱 Mobile User Tip:</b> Tap the <b>></b> arrow in the top-left corner to find your <b>Suggested Prompts</b>!
     </div>
     """, unsafe_allow_html=True)
-
-SYSTEM_BEHAVIOR = """
-You are the Eco-Education Curriculum Assistant for "Saving Planet Earth: Revolutionary Ways to Teach Eco-Education."
-You represent the pedagogical work of Ann Lewin-Benham.
-
-STRICT CLASSROOM PROTOCOL:
-1. SAFEGUARD: Never discuss explicit, violent, or sensitive adult content. 
-2. REFUSAL: If asked about adult topics, refuse and pivot back to the curriculum.
-3. SCOPE: Focus on the curriculum. Link general curiosity back to Ann Lewin-Benham's methods.
-"""
-
-SUGGESTION_PROMPT = """
-Based on the discussion of Ann Lewin-Benham's curriculum, generate 3 child-safe "Suggested Prompts".
-Return ONLY a JSON list of strings. Format: ["Prompt 1", "Prompt 2", "Prompt 3"]
-"""
-
-INTRO_TEXT = """Welcome! I am your AI assistant for **Saving Planet Earth: Revolutionary Ways to Teach Eco-Education**. 
-
-I am here to help you navigate Ann Lewin-Benham’s curriculum. You can ask me about specific chapters, teaching strategies, or fostering meaningful conversations. 
-
-Try selecting a topic from the **Suggested Prompts**, or type your own question below to begin."""
 
 # --- 2. THE ENGINE ---
 @st.cache_resource
 def get_bot_chain(_api_key):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
-    
     if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
         vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
     else:
         all_files = []
         for ext in [".docx", ".pdf", ".txt"]:
             all_files.extend(glob.glob(os.path.join(DOCS_DIR, f"**/*{ext}"), recursive=True))
-        
         documents = []
         for file_path in all_files:
             try:
@@ -87,31 +61,23 @@ def get_bot_chain(_api_key):
                 elif ext == ".txt": loader = TextLoader(file_path)
                 documents.extend(loader.load())
             except: continue
-
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(documents)
         vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=VECTOR_DB_DIR)
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 7}) 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_BEHAVIOR + "\n\nContext from curriculum:\n{context}"),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ])
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=_api_key)
+    return retriever, llm
 
-    rag_chain = (
-        {
-            "context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
-            "input": lambda x: x["input"],
-            "chat_history": lambda x: x["chat_history"],
-        }
-        | prompt | llm | StrOutputParser()
-    )
-    return rag_chain, llm
+# --- 3. SESSION STATE INITIALIZATION ---
+if "messages" not in st.session_state: st.session_state.messages = []
+if "step" not in st.session_state: st.session_state.step = "zip"
+if "profile" not in st.session_state: 
+    st.session_state.profile = {"zip": None, "role": None, "age": None, "season": datetime.now().strftime("%B")}
+if "suggestions" not in st.session_state:
+    st.session_state.suggestions = ["What are the big ideas?", "Tell me about ecosystems.", "Ann Lewin-Benham's philosophy."]
 
-# --- 3. UI ---
+# --- 4. UI HEADERS ---
 st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
 st.subheader("by Ann Lewin-Benham")
 
@@ -120,47 +86,93 @@ if not api_key:
     st.error("API Key missing.")
     st.stop()
 
-chain, llm_model = get_bot_chain(api_key)
+retriever, llm_model = get_bot_chain(api_key)
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.show_intro = True
+# --- 5. ONBOARDING WIZARD ---
+if st.session_state.step != "complete":
+    with st.expander("🌱 Personalizing your Experience", expanded=True):
+        if st.session_state.step == "zip":
+            zip_in = st.text_input("To tailor activities to your local season, please enter your Zip Code:")
+            if st.button("Next") and zip_in:
+                st.session_state.profile["zip"] = zip_in
+                st.session_state.step = "role"
+                st.rerun()
 
-if "suggestions" not in st.session_state:
-    st.session_state.suggestions = [
-        "What are the big ideas of this curriculum?", 
-        "How do we teach about ecosystems?", 
-        "Tell me about Ann Lewin-Benham's philosophy."
-    ]
+        elif st.session_state.step == "role":
+            st.write("Are you a:")
+            col1, col2, col3, col4 = st.columns(4)
+            if col1.button("Teacher"): st.session_state.profile["role"] = "Teacher"; st.session_state.step = "complete"; st.rerun()
+            if col2.button("Parent"): st.session_state.profile["role"] = "Parent"; st.session_state.step = "complete"; st.rerun()
+            if col3.button("Student"): st.session_state.profile["role"] = "Student"; st.session_state.step = "age"; st.rerun()
+            if col4.button("Other"): st.session_state.profile["role"] = "Other"; st.session_state.step = "complete"; st.rerun()
 
-# --- SIDEBAR: SUGGESTED PROMPTS ---
+        elif st.session_state.step == "age":
+            age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=12)
+            if st.button("Finish Setup"):
+                st.session_state.profile["age"] = age_in
+                st.session_state.step = "complete"
+                st.rerun()
+    st.stop() # Prevent chat until setup is done
+
+# --- 6. PERSONALIZED SYSTEM PROMPT ---
+p = st.session_state.profile
+role_context = {
+    "Teacher": "Focus on classroom implementation, pedagogy, and curriculum mapping.",
+    "Parent": "Focus on home-based activities, simple explanations, and fostering curiosity.",
+    "Student": f"Adjust verbiage to a {p['age']}-year-old level. Use relatable examples.",
+    "Other": "Provide clear, professional summaries of the curriculum."
+}
+
+SYSTEM_BEHAVIOR = f"""
+You are the Eco-Education Curriculum Assistant for Ann Lewin-Benham. 
+USER PROFILE: Role: {p['role']}, Age: {p['age']}, Zip Code: {p['zip']}, Current Month: {p['season']}.
+
+INSTRUCTIONS:
+1. PIVOT: Tailor activities to the user's location/zip code and the current season ({p['season']}). 
+2. TONE: {role_context.get(p['role'])}
+3. RULES: Only use child-safe content. Treat documents as a unified curriculum.
+4. REFUSAL: Politley refuse adult/sensitive topics and return to the curriculum.
+"""
+
+# --- 7. CHAT LOGIC ---
+prompt_template = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+])
+
+rag_chain = (
+    {"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)),
+     "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]}
+    | prompt_template | llm_model | StrOutputParser()
+)
+
+# Sidebar
 st.sidebar.title("Suggested Prompts")
-for suggestion in st.session_state.suggestions:
-    if st.sidebar.button(suggestion):
-        st.session_state.user_query = suggestion
+for s in st.session_state.suggestions:
+    if st.sidebar.button(s): st.session_state.user_query = s
 
-# --- DISPLAY CHAT ---
+if st.sidebar.button("🔄 Reset Profile"):
+    st.session_state.step = "zip"
+    st.session_state.messages = []
+    st.rerun()
+
+# Display
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# --- INTRO LOGIC ---
-if st.session_state.get("show_intro"):
+# Intro for first-time completion
+if not st.session_state.messages:
     with st.chat_message("assistant"):
-        def stream_intro():
-            for word in INTRO_TEXT.split(" "):
-                yield word + " "
-                time.sleep(0.03)
-        intro_response = st.write_stream(stream_intro())
-        st.session_state.messages.append({"role": "assistant", "content": intro_response})
-    st.session_state.show_intro = False
+        intro = f"Welcome! I've personalized my brain for a {p['role']} in Zip Code {p['zip']}. How can I help you explore the curriculum today?"
+        st.markdown(intro)
+        st.session_state.messages.append({"role": "assistant", "content": intro})
 
-# --- USER INPUT ---
-user_input = st.chat_input("Ask a question about the curriculum...")
+user_input = st.chat_input("Ask a question...")
 final_query = st.session_state.get("user_query") or user_input
 
 if final_query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
-    
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
@@ -168,19 +180,16 @@ if final_query:
     
     with st.chat_message("assistant"):
         def stream_response():
-            full_response = chain.invoke({"input": final_query, "chat_history": history})
+            full_response = rag_chain.invoke({"input": final_query, "chat_history": history})
             for word in full_response.split(" "):
                 yield word + " "
                 time.sleep(0.04)
-
-        response_text = st.write_stream(stream_response())
-        st.session_state.messages.append({"role": "assistant", "content": response_text})
+        res_text = st.write_stream(stream_response())
+        st.session_state.messages.append({"role": "assistant", "content": res_text})
         
-        # Adaptive suggestions update
+        # Adaptive suggestions
         try:
-            chat_context = f"User: {final_query}\nAssistant: {response_text}"
-            res = llm_model.invoke([("system", SUGGESTION_PROMPT), ("human", chat_context)])
+            suggest_p = "Generate 3 follow-up prompts for this user role and topic. Return JSON list."
+            res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
             st.session_state.suggestions = json.loads(res.content)
-        except: pass
-            
-    st.rerun()
+        except
