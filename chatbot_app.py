@@ -93,11 +93,10 @@ PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_ag
 
 STRICT RULES:
 1. BREVITY: Max 2 paragraphs. No fluff.
-2. DYNAMIC ROLE: If user says "Switch to student/parent/teacher", acknowledge and change tone.
-3. PARENT ROLE: Suggest 1 prompt to ask the child. Ask for kid's age if unknown.
-4. STUDENT ROLE: Speak directly to age {p['age'] or p['kid_age'] or '12'}. 
-5. LOCAL/SEASONAL: Use zip and month to suggest indoor vs outdoor activities.
-6. POWER WORDS: Bold and use technical terms from the curriculum (e.g., **Biophilia**, **Stewardship**, **Interdependence**).
+2. ROLE SHIFT: If user says "Switch to student/parent/teacher", confirm the change and shift tone.
+3. PARENT ROLE: Suggest 1 activity and 1-2 prompts for the child. 
+4. STUDENT ROLE: Mentor age {p['age'] or p['kid_age'] or '12'} directly. 
+5. POWER WORDS: Bold them in your text. Only use definitions for Adults if the word is academic/complex (e.g. Taxonomy). Use more definitions for Students.
 """
 
 # --- 7. SIDEBAR ---
@@ -116,9 +115,9 @@ with st.sidebar:
 
     for _ in range(5): st.write("") 
     st.divider()
-    if st.button("📄 Generate Session Summary"):
+    if st.button("📄 Session Summary"):
         summary_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
-        st.download_button("Download Session Log", summary_text, file_name="eco_session.txt")
+        st.download_button("Download Summary", summary_text, file_name="eco_session.txt")
     
     if st.button("🔄 Reset Profile"):
         st.session_state.step = "zip"; st.session_state.messages = []; st.session_state.profile["kid_age"] = None; st.session_state.power_words = {}; st.rerun()
@@ -152,10 +151,12 @@ query = st.session_state.get("user_query") or user_input
 if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # Role switch detection
+    # Improved Role switch detection
     for k, v in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
-        if f"switch to {k}" in query.lower() or f"i am a {k}" in query.lower():
+        if f"switch to {k}" in query.lower() or f"i am a {k}" in query.lower() or f"for my {k}" in query.lower():
             st.session_state.profile["role"] = v
+            # Clear power words when role changes to refresh vocabulary relevance
+            st.session_state.power_words = {}
 
     # Age detection
     if st.session_state.profile["kid_age"] is None:
@@ -180,13 +181,15 @@ if query:
         
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         
-        # DYNAMIC UPDATES: Suggestions & Power Words
+        # DYNAMIC UPDATES with Age-Aware Vocabulary
         try:
             update_p = f"""
-            Analyze: '{full_res}'. 
-            1. 3 questions a {p['role']} would ask next (JSON list 'prompts').
-            2. Any complex curriculum words used and their 1-sentence definition (JSON object 'vocab').
-            Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
+            Analyze response: '{full_res}'.
+            1. Generate 3 short USER questions for a {p['role']} (JSON list 'prompts').
+            2. Extract vocabulary.
+               - If Role is Parent/Teacher: Only extract academic/high-level terms (e.g., Biophilia, Taxonomy).
+               - If Role is Student: Extract scientific terms (e.g., Interdependence, Spores).
+               Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             update_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(update_res.content)
