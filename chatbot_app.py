@@ -1,8 +1,5 @@
 import streamlit as st
-import os
-import glob
-import json
-import time
+import os, glob, json, time, re
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -20,7 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
-st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
+st.set_page_config(page_title="Eco-Education Assistant", layout="wide", page_icon="🌱")
 
 # --- 2. THE ENGINE ---
 @st.cache_resource
@@ -45,8 +42,8 @@ def get_bot_chain(_api_key):
         splits = text_splitter.split_documents(documents)
         vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=VECTOR_DB_DIR)
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 7}) 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, openai_api_key=_api_key)
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5}) 
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=_api_key)
     return retriever, llm
 
 # --- 3. SESSION STATE ---
@@ -55,73 +52,76 @@ if "step" not in st.session_state: st.session_state.step = "zip"
 if "profile" not in st.session_state: 
     st.session_state.profile = {"zip": None, "role": None, "age": None, "kid_age": None, "season": datetime.now().strftime("%B")}
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["How do I use this curriculum?", "What are the core pillars?", "Tell me about Ann Lewin-Benham."]
+    st.session_state.suggestions = ["How to start an observation?", "Core pillars of the curriculum?", "Tell me about Ann Lewin-Benham."]
+if "power_words" not in st.session_state: st.session_state.power_words = {}
 
 # --- 4. UI SETUP ---
-st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
-st.subheader("by Ann Lewin-Benham")
-
+st.title("Saving Planet Earth: Eco-Education Assistant")
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key:
-    st.error("API Key missing.")
-    st.stop()
+    st.error("API Key missing."); st.stop()
 
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 5. ONBOARDING WIZARD ---
+# --- 5. ONBOARDING ---
 if st.session_state.step != "complete":
     with st.container():
-        st.info("🌱 **Let's personalize your experience.**")
+        st.info("🌱 **Quick Personalization**")
         if st.session_state.step == "zip":
-            zip_in = st.text_input("Please enter your Zip Code:")
+            zip_in = st.text_input("Zip Code:")
             if st.button("Next") and zip_in:
                 st.session_state.profile["zip"] = zip_in
                 st.session_state.step = "role"; st.rerun()
         elif st.session_state.step == "role":
-            st.write("Are you a:")
+            st.write("I am a:")
             c1, c2, c3, c4 = st.columns(4)
             if c1.button("Teacher"): st.session_state.profile["role"] = "Teacher"; st.session_state.step = "complete"; st.rerun()
             if c2.button("Parent"): st.session_state.profile["role"] = "Parent"; st.session_state.step = "complete"; st.rerun()
             if c3.button("Student"): st.session_state.profile["role"] = "Student"; st.session_state.step = "age"; st.rerun()
             if c4.button("Other"): st.session_state.profile["role"] = "Other"; st.session_state.step = "complete"; st.rerun()
         elif st.session_state.step == "age":
-            age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=12)
-            if st.button("Finish Setup"):
+            age_in = st.number_input("How old are you?", min_value=3, max_value=100, value=14)
+            if st.button("Finish"):
                 st.session_state.profile["age"] = age_in; st.session_state.step = "complete"; st.rerun()
     st.stop()
 
-# --- 6. SOCRATIC SYSTEM BEHAVIOR ---
+# --- 6. BEHAVIOR ---
 p = st.session_state.profile
-role_context = {
-    "Teacher": "Focus on pedagogical theory and classroom implementation.",
-    "Parent": f"Act as a co-explorer. Focus on sparking conversation. KID AGE: {p['kid_age'] if p['kid_age'] else 'Unknown'}.",
-    "Student": f"Speak as a mentor to a {p['age']}-year-old.",
-    "Other": "Summarize the curriculum clearly."
-}
-
 SYSTEM_BEHAVIOR = f"""
-You are a Socratic Eco-Education Mentor based on Ann Lewin-Benham's work.
-USER: {p['role']}, User Age: {p['age']}, Zip: {p['zip']}, Month: {p['season']}.
-KID CONTEXT: The user's child is {p['kid_age'] if p['kid_age'] else 'of unknown age'}.
+You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
+PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, Zip={p['zip']}, Season={p['season']}.
 
-CONVERSATIONAL PROTOCOL:
-1. AGE DETECTION: If the user mentions a child/kid and KID CONTEXT is 'unknown', your FIRST priority is to ask for the child's age so you can tailor the activities.
-2. SOCRATIC FLOW: Avoid long lists. Start with a curriculum-based insight, then ask 1-2 clarifying questions about the observation or goal.
-3. TAILORING: Use the Zip ({p['zip']}) and Month ({p['season']}) to ensure outdoor activities make sense for the climate.
-4. TONE: {role_context.get(p['role'])}. Ground every answer in the provided documents.
+STRICT RULES:
+1. BREVITY: Max 2 paragraphs. No fluff.
+2. DYNAMIC ROLE: If user says "Switch to student/parent/teacher", acknowledge and change tone.
+3. PARENT ROLE: Suggest 1 prompt to ask the child. Ask for kid's age if unknown.
+4. STUDENT ROLE: Speak directly to age {p['age'] or p['kid_age'] or '12'}. 
+5. LOCAL/SEASONAL: Use zip and month to suggest indoor vs outdoor activities.
+6. POWER WORDS: Bold and use technical terms from the curriculum (e.g., **Biophilia**, **Stewardship**, **Interdependence**).
 """
 
 # --- 7. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
-    st.caption("Click to ask:")
     for s in st.session_state.suggestions:
-        if st.button(s): st.session_state.user_query = s
+        if st.button(s, use_container_width=True): 
+            st.session_state.user_query = s
+            st.rerun()
     
-    for _ in range(15): st.write("") 
+    if st.session_state.power_words:
+        st.divider()
+        st.subheader("📚 Power Words")
+        for word, defn in st.session_state.power_words.items():
+            st.markdown(f"**{word}**: {defn}")
+
+    for _ in range(5): st.write("") 
     st.divider()
+    if st.button("📄 Generate Session Summary"):
+        summary_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+        st.download_button("Download Session Log", summary_text, file_name="eco_session.txt")
+    
     if st.button("🔄 Reset Profile"):
-        st.session_state.step = "zip"; st.session_state.messages = []; st.session_state.profile["kid_age"] = None; st.rerun()
+        st.session_state.step = "zip"; st.session_state.messages = []; st.session_state.profile["kid_age"] = None; st.session_state.power_words = {}; st.rerun()
 
 # --- 8. CHAT ENGINE ---
 prompt_template = ChatPromptTemplate.from_messages([
@@ -136,49 +136,61 @@ rag_chain = (
     | prompt_template | llm_model | StrOutputParser()
 )
 
-# --- 9. DISPLAY & INPUT ---
+# --- 9. DISPLAY ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if not st.session_state.messages:
-    with st.chat_message("assistant"):
-        intro = f"Welcome! I am ready to help you navigate Ann Lewin-Benham's curriculum for a **{p['role']}** in Zip Code **{p['zip']}**. How can I assist your teaching or exploration today?"
-        st.markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
+    intro = f"Ready to explore as a **{p['role']}**. What's your focus today?"
+    with st.chat_message("assistant"): st.markdown(intro)
+    st.session_state.messages.append({"role": "assistant", "content": intro})
 
+# --- 10. INPUT & DYNAMIC UPDATES ---
 user_input = st.chat_input("Type here...")
-final_query = st.session_state.get("user_query") or user_input
+query = st.session_state.get("user_query") or user_input
 
-if final_query:
+if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # Check if the user is providing the kid's age in response to a prompt
-    if st.session_state.profile["kid_age"] is None and any(word in final_query.lower() for word in ["years old", "is 5", "age 7", "he is", "she is"]):
-        # Simple extraction logic: find the first number in the string
-        import re
-        nums = re.findall(r'\d+', final_query)
-        if nums: st.session_state.profile["kid_age"] = nums[0]
+    # Role switch detection
+    for k, v in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
+        if f"switch to {k}" in query.lower() or f"i am a {k}" in query.lower():
+            st.session_state.profile["role"] = v
 
-    st.session_state.messages.append({"role": "user", "content": final_query})
-    with st.chat_message("user"): st.markdown(final_query)
+    # Age detection
+    if st.session_state.profile["kid_age"] is None:
+        nums = re.findall(r'\d+', query)
+        if nums and any(w in query.lower() for w in ["year", "age", "is"]): 
+            st.session_state.profile["kid_age"] = nums[0]
+
+    st.session_state.messages.append({"role": "user", "content": query})
+    with st.chat_message("user"): st.markdown(query)
     
-    history = []
-    for m in st.session_state.messages[:-1]:
-        if m["role"] == "user": history.append(HumanMessage(content=m["content"]))
-        else: history.append(AIMessage(content=m["content"]))
+    history = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
 
     with st.chat_message("assistant"):
-        def stream_response():
-            full_response = rag_chain.invoke({"input": final_query, "chat_history": history})
-            for word in full_response.split(" "):
-                yield word + " "; time.sleep(0.04)
-        res_text = st.write_stream(stream_response())
-        st.session_state.messages.append({"role": "assistant", "content": res_text})
+        res_container = st.empty()
+        full_res = rag_chain.invoke({"input": query, "chat_history": history})
         
+        typed_res = ""
+        for word in full_res.split(" "):
+            typed_res += word + " "
+            res_container.markdown(typed_res)
+            time.sleep(0.01)
+        
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        
+        # DYNAMIC UPDATES: Suggestions & Power Words
         try:
-            suggest_p = f"Generate 3 short prompts a {p['role']} would ask the chatbot next. Return JSON list."
-            res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
-            st.session_state.suggestions = json.loads(res.content)
-        except Exception: 
-            st.session_state.suggestions = ["Tell me more.", "What is a good next step?", "Explain this simply."]
-            
+            update_p = f"""
+            Analyze: '{full_res}'. 
+            1. 3 questions a {p['role']} would ask next (JSON list 'prompts').
+            2. Any complex curriculum words used and their 1-sentence definition (JSON object 'vocab').
+            Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
+            """
+            update_res = llm_model.invoke([("system", update_p), ("human", query)])
+            data = json.loads(update_res.content)
+            st.session_state.suggestions = data.get("prompts", [])
+            st.session_state.power_words.update(data.get("vocab", {}))
+        except: pass
     st.rerun()
