@@ -98,16 +98,13 @@ if st.session_state.step != "complete":
 p = st.session_state.profile
 SYSTEM_BEHAVIOR = f"""
 You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
-CURRENT PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}.
+CURRENT PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, ZIP={p['zip']}.
 
-STRICT TONE RULES:
-1. BREVITY: Max 2 paragraphs. No filler.
-2. AGE-APPROPRIATE LANGUAGE: 
-   - If user is a Student (Age {p['age']}), you MUST use words a child of that age understands. 
-   - For a 6-year-old: Use simple, relatable words (e.g., 'neighbors' instead of 'community', 'home' instead of 'habitat').
-   - For a Parent/Teacher talking about a child: The activities you suggest must match the child's age. 
-3. AGE GUARD: If Role=Parent and KidAge='Unknown', ask for the age before giving activity advice.
-4. ROLE ISOLATION: Students are explorers. Adults are coaches.
+STRICT RULES:
+1. BREVITY: Max 2 paragraphs.
+2. LOCAL CONTEXT: Use the ZIP CODE ({p['zip']}) to answer questions about what lives in the user's area. Never ask for their location if it is already in the ZIP variable.
+3. AGE-APPROPRIATE: For a {p['age']}-year-old, use simple words. Translate complex ideas into metaphors (e.g., 'nature's recyclers' instead of 'decomposers').
+4. VOCAB: Sidebar Power Words should be "stretch" words for a {p['age']}-year-old. No basic words for Adults.
 """
 
 # --- 7. SIDEBAR ---
@@ -185,19 +182,18 @@ if query:
         target_age = p['age'] if p['role'] == "Student" else p['kid_age']
         try:
             update_p = f"""
-            Analyze response: '{full_res}'. Target User/Child Age: {target_age or 'Unknown'}.
+            Analyze response: '{full_res}'. User ZIP: {p['zip']}.
             1. Suggest 3 short user questions for role: {p['role']}. 
             2. VOCAB RULES:
                - If Role is Adult ({p['role']}): ONLY include high-level pedagogical or curriculum theory terms.
                - If Role is Student or regarding a Child (Age {target_age or 12}): Select 1-2 words from the response that are "stretch" words for this specific age.
-               - Definitions MUST be a simple string.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
             
-            clean_vocab = {{k: v for k, v in data.get("vocab", {}).items() if isinstance(v, str)}}
+            clean_vocab = {k: v for k, v in data.get("vocab", {}).items() if isinstance(v, str)}
             st.session_state.power_words.update(clean_vocab)
         except: pass
     st.rerun()
