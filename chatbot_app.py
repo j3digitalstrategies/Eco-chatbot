@@ -53,9 +53,9 @@ def get_bot_chain(_api_key):
 if "messages" not in st.session_state: st.session_state.messages = []
 if "step" not in st.session_state: st.session_state.step = "zip"
 if "profile" not in st.session_state: 
-    st.session_state.profile = {"zip": None, "role": None, "age": None, "season": datetime.now().strftime("%B")}
+    st.session_state.profile = {"zip": None, "role": None, "age": None, "kid_age": None, "season": datetime.now().strftime("%B")}
 if "suggestions" not in st.session_state:
-    st.session_state.suggestions = ["What makes moss bouncy?", "How does moss help trees?", "Where can we find more moss?"]
+    st.session_state.suggestions = ["How do I use this curriculum?", "What are the core pillars?", "Tell me about Ann Lewin-Benham."]
 
 # --- 4. UI SETUP ---
 st.title("Saving Planet Earth: Revolutionary Ways to Teach Eco-Education Chatbot")
@@ -93,35 +93,35 @@ if st.session_state.step != "complete":
 # --- 6. SOCRATIC SYSTEM BEHAVIOR ---
 p = st.session_state.profile
 role_context = {
-    "Teacher": "Provide pedagogical frameworks and classroom-ready prompts.",
-    "Parent": "Act as a co-explorer. Focus on sparking conversation between parent and child.",
-    "Student": f"Speak as a mentor to a {p['age']}-year-old. Use clear, vivid, and simple language.",
-    "Other": "Provide accessible summaries of the Eco-Education philosophy."
+    "Teacher": "Focus on pedagogical theory and classroom implementation.",
+    "Parent": f"Act as a co-explorer. Focus on sparking conversation. KID AGE: {p['kid_age'] if p['kid_age'] else 'Unknown'}.",
+    "Student": f"Speak as a mentor to a {p['age']}-year-old.",
+    "Other": "Summarize the curriculum clearly."
 }
 
 SYSTEM_BEHAVIOR = f"""
 You are a Socratic Eco-Education Mentor based on Ann Lewin-Benham's work.
-USER: {p['role']}, Age: {p['age']}, Zip: {p['zip']}, Month: {p['season']}.
+USER: {p['role']}, User Age: {p['age']}, Zip: {p['zip']}, Month: {p['season']}.
+KID CONTEXT: The user's child is {p['kid_age'] if p['kid_age'] else 'of unknown age'}.
 
 CONVERSATIONAL PROTOCOL:
-1. NO DUMPING: Never provide a full list of activities or long explanations in the first response.
-2. OBSERVE & PROMPT: Use the user's descriptions (e.g., 'stringy', 'bouncy') to explain a specific concept from the curriculum. 
-3. MEANING-FULL CONVERSATION: End your response with 1-2 questions for the user to ask their child, or questions to help you narrow down the next step.
-4. TONE: {role_context.get(p['role'])}. Be warm, curious, and grounded in the text.
+1. AGE DETECTION: If the user mentions a child/kid and KID CONTEXT is 'unknown', your FIRST priority is to ask for the child's age so you can tailor the activities.
+2. SOCRATIC FLOW: Avoid long lists. Start with a curriculum-based insight, then ask 1-2 clarifying questions about the observation or goal.
+3. TAILORING: Use the Zip ({p['zip']}) and Month ({p['season']}) to ensure outdoor activities make sense for the climate.
+4. TONE: {role_context.get(p['role'])}. Ground every answer in the provided documents.
 """
 
-# --- 7. SIDEBAR (RESET AT BOTTOM) ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
-    st.caption("Click a prompt to ask the chatbot:")
+    st.caption("Click to ask:")
     for s in st.session_state.suggestions:
         if st.button(s): st.session_state.user_query = s
     
-    # Push the Reset button to the bottom using empty space
     for _ in range(15): st.write("") 
     st.divider()
     if st.button("🔄 Reset Profile"):
-        st.session_state.step = "zip"; st.session_state.messages = []; st.rerun()
+        st.session_state.step = "zip"; st.session_state.messages = []; st.session_state.profile["kid_age"] = None; st.rerun()
 
 # --- 8. CHAT ENGINE ---
 prompt_template = ChatPromptTemplate.from_messages([
@@ -142,24 +142,29 @@ for m in st.session_state.messages:
 
 if not st.session_state.messages:
     with st.chat_message("assistant"):
-        intro = f"Welcome! I'm ready to explore with a **{p['role']}** in Zip Code **{p['zip']}**. What have you observed in nature today?"
+        intro = f"Welcome! I am ready to help you navigate Ann Lewin-Benham's curriculum for a **{p['role']}** in Zip Code **{p['zip']}**. How can I assist your teaching or exploration today?"
         st.markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
-user_input = st.chat_input("Type your observation or question here...")
+user_input = st.chat_input("Type here...")
 final_query = st.session_state.get("user_query") or user_input
 
 if final_query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
+    
+    # Check if the user is providing the kid's age in response to a prompt
+    if st.session_state.profile["kid_age"] is None and any(word in final_query.lower() for word in ["years old", "is 5", "age 7", "he is", "she is"]):
+        # Simple extraction logic: find the first number in the string
+        import re
+        nums = re.findall(r'\d+', final_query)
+        if nums: st.session_state.profile["kid_age"] = nums[0]
+
     st.session_state.messages.append({"role": "user", "content": final_query})
     with st.chat_message("user"): st.markdown(final_query)
     
-    # FIXED: Reconstructed history logic with clean list comprehension
     history = []
     for m in st.session_state.messages[:-1]:
-        if m["role"] == "user":
-            history.append(HumanMessage(content=m["content"]))
-        else:
-            history.append(AIMessage(content=m["content"]))
+        if m["role"] == "user": history.append(HumanMessage(content=m["content"]))
+        else: history.append(AIMessage(content=m["content"]))
 
     with st.chat_message("assistant"):
         def stream_response():
@@ -169,18 +174,11 @@ if final_query:
         res_text = st.write_stream(stream_response())
         st.session_state.messages.append({"role": "assistant", "content": res_text})
         
-        # IMPROVED SUGGESTION LOGIC: Force prompt to be from User's perspective
         try:
-            suggest_p = f"""
-            Based on the current topic ({final_query}), generate 3 short prompts. 
-            These MUST be questions the USER (a {p['role']}) would ask the CHATBOT.
-            Do NOT ask about the user's child's interest. 
-            Instead, suggest questions like: "What is moss made of?" or "Give me a simple moss activity."
-            Return ONLY a JSON list of strings.
-            """
+            suggest_p = f"Generate 3 short prompts a {p['role']} would ask the chatbot next. Return JSON list."
             res = llm_model.invoke([("system", suggest_p), ("human", res_text)])
             st.session_state.suggestions = json.loads(res.content)
         except Exception: 
-            st.session_state.suggestions = ["Tell me more about this.", "What is a good next step?", "Explain this simply."]
+            st.session_state.suggestions = ["Tell me more.", "What is a good next step?", "Explain this simply."]
             
     st.rerun()
