@@ -46,7 +46,7 @@ def get_bot_chain(_api_key):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=_api_key)
     return retriever, llm
 
-# --- 3. DEFAULTS BY ROLE ---
+# --- 3. ROLE DEFAULTS ---
 DEFAULT_PROMPTS = {
     "Parent": ["How do I start an observation?", "Activity for my child?", "What is Meaning-FULL conversation?"],
     "Teacher": ["Classroom implementation ideas?", "Pedagogical frameworks?", "How to document observations?"],
@@ -103,15 +103,16 @@ You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
 PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, Zip={p['zip']}.
 
 STRICT RULES:
-1. BREVITY: Max 2 paragraphs.
-2. ROLE ISOLATION: When the role is Student, do NOT mention "your child" or "teaching." Speak to the user as the explorer.
-3. PARENT ROLE: Focus on "Meaning-FULL" dialogue between parent and child.
-4. STUDENT ROLE: Focus on direct observation, biophilia, and stewardship at age {p['age'] or p['kid_age'] or '12'}.
+1. BREVITY: Max 2 paragraphs. No "That's wonderful" or filler.
+2. ROLE ISOLATION: If Student, speak to the user as the explorer. Never mention "teaching" or "your child."
+3. PARENT/TEACHER: Suggest activities and Socratic questions to use with students.
+4. VOCAB: Bold curriculum terms. Define only academic terms for Adults, and most scientific terms for Students.
 """
 
 # --- 8. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
+    st.markdown("---")
     for s in st.session_state.suggestions:
         if st.button(s, use_container_width=True): 
             st.session_state.user_query = s
@@ -125,8 +126,11 @@ with st.sidebar:
 
     for _ in range(5): st.write("") 
     st.divider()
-    if st.button("🔄 Reset to Start"):
-        for key in list(st.session_state.keys()): del st.session_state[key]
+    if st.button("🔄 Reset User Profile"):
+        # Clear everything but keep the API key logic intact
+        for key in list(st.session_state.keys()): 
+            if key not in ["suggestions", "power_words"]: del st.session_state[key]
+        st.session_state.step = "zip"
         st.rerun()
 
 # --- 9. CHAT ENGINE ---
@@ -158,14 +162,12 @@ query = st.session_state.get("user_query") or user_input
 if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # FORCED ROLE SWITCHING & PROMPT RESET
-    switched = False
+    # ROLE SWITCHER - Immediate Reset of Prompts to Defaults
     for r_key, r_val in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
         if f"switch to {r_key}" in query.lower() or f"i am a {r_key}" in query.lower():
             st.session_state.profile["role"] = r_val
-            st.session_state.suggestions = DEFAULT_PROMPTS[r_val] # Force reset suggestions
-            st.session_state.power_words = {} # Clear vocab
-            switched = True
+            st.session_state.suggestions = DEFAULT_PROMPTS[r_val]
+            st.session_state.power_words = {}
 
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
@@ -184,13 +186,20 @@ if query:
         
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         
-        # Update dynamic prompts only if we didn't just force a role reset
-        if not switched:
-            try:
-                update_p = f"Analyze: '{full_res}'. Give 3 User questions for a {p['role']}. Extract academic vocab if Parent/Teacher, scientific vocab if Student. JSON: {{'prompts': [], 'vocab': {{}}}}"
-                u_res = llm_model.invoke([("system", update_p), ("human", query)])
-                data = json.loads(u_res.content)
-                st.session_state.suggestions = data.get("prompts", [])
-                st.session_state.power_words.update(data.get("vocab", {}))
-            except: pass
+        # DYNAMIC UPDATES - Regenerate based on the LATEST interaction
+        try:
+            update_p = f"""
+            Analyze this response: '{full_res}'.
+            1. Suggest 3 short USER questions for a {p['role']} based ONLY on this last response.
+            2. Extract vocab definitions: High-level/Academic for Parents/Teachers, Scientific for Students.
+            Return JSON: {{"prompts": [], "vocab": {{}}}}
+            """
+            u_res = llm_model.invoke([("system", update_p), ("human", query)])
+            data = json.loads(u_res.content)
+            
+            # Update suggestions dynamically for the NEXT turn
+            st.session_state.suggestions = data.get("prompts", [])
+            st.session_state.power_words.update(data.get("vocab", {}))
+        except:
+            pass
     st.rerun()
