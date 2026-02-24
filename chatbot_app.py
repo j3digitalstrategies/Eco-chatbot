@@ -48,10 +48,10 @@ def get_bot_chain(_api_key):
 
 # --- 3. ROLE DEFAULTS ---
 DEFAULT_PROMPTS = {
-    "Parent": ["How do I start an observation?", "Activity for my child?", "What is Meaning-FULL conversation?"],
-    "Teacher": ["Classroom implementation ideas?", "Pedagogical frameworks?", "How to document observations?"],
+    "Parent": ["How do I start an observation?", "What is Meaning-FULL conversation?", "How to foster biophilia?"],
+    "Teacher": ["Classroom implementation?", "Documentation strategies?", "What are the core pillars?"],
     "Student": ["What can I explore today?", "Tell me a cool nature fact.", "How do I start a nature journal?"],
-    "Other": ["Tell me about the curriculum.", "Who is Ann Lewin-Benham?", "What are the core pillars?"]
+    "Other": ["Tell me about the curriculum.", "Who is Ann Lewin-Benham?", "What is Eco-Education?"]
 }
 
 # --- 4. SESSION STATE ---
@@ -103,10 +103,14 @@ You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
 PROFILE: Role={p['role']}, UserAge={p['age']}, KidAge={p['kid_age'] if p['kid_age'] else 'Unknown'}, Zip={p['zip']}.
 
 STRICT RULES:
-1. BREVITY: Max 2 paragraphs. No "fluff" or "that's wonderful" phrases.
-2. AGE GUARD: If kid_age is 'Unknown' and you mention an activity for a child, you MUST ask for the child's age first.
-3. ROLE ISOLATION: If Student, speak to the user as the explorer. If Parent/Teacher, act as a coach.
-4. VOCAB: Only include complex curriculum terms (e.g., Biophilia, Taxonomy) for Adults. Exclude common words like 'moss'. Definitions must be clean strings, NO JSON objects.
+1. BREVITY: Max 2 paragraphs. No "That's wonderful" fluff.
+2. AGE-CHECK: If Role is Parent and KidAge is 'Unknown', you MUST ask the user for the child's age before giving any specific teaching advice.
+3. ROLE ISOLATION: Students are explorers. Parents/Teachers are coaches.
+4. TIERED VOCAB: 
+   - ADULTS: Include only curriculum theory or advanced science (e.g. Biophilia). Exclude basic words like 'Conservation' or 'Ecosystem'.
+   - TEEN STUDENTS (13-18): Include advanced ecological terms.
+   - YOUNG STUDENTS (<13): Include foundational terms. 
+   - ALWAYS return clean strings, never dictionaries.
 """
 
 # --- 8. SIDEBAR ---
@@ -158,7 +162,7 @@ query = st.session_state.get("user_query") or user_input
 if query:
     if "user_query" in st.session_state: del st.session_state["user_query"]
     
-    # Check for Role Switch
+    # Role Switch
     for r_key, r_val in {"student": "Student", "teacher": "Teacher", "parent": "Parent"}.items():
         if f"switch to {r_key}" in query.lower() or f"i am a {r_key}" in query.lower():
             st.session_state.profile["role"] = r_val
@@ -168,7 +172,7 @@ if query:
     # Extract Kid Age
     nums = re.findall(r'\d+', query)
     if nums and any(w in query.lower() for w in ["year", "age", "is"]): 
-        st.session_state.profile["kid_age"] = nums[0]
+        st.session_state.profile["kid_age"] = int(nums[0])
 
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
@@ -191,8 +195,10 @@ if query:
         try:
             update_p = f"""
             Analyze response: '{full_res}'.
-            1. Suggest 3 USER questions for a {p['role']}. If kid_age is unknown and child was mentioned, #1 MUST be "How old is my child?".
-            2. Extract curriculum vocab (Parent: complex only, Student: scientific). Return ONLY a clean string definition.
+            1. Suggest 3 short user questions for a {p['role']} based on the last response.
+            2. Extract vocab. RULES:
+               - Parent/Teacher/Adult: ONLY curriculum theory or high-level science. NO basic words like 'Conservation'.
+               - Student Age {p['age'] or p['kid_age'] or 12}: Age-appropriate scientific terms.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
