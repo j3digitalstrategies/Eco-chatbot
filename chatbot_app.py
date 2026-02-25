@@ -68,7 +68,7 @@ if not st.session_state.onboarded:
                 if u_role == "Student":
                     st.session_state.suggestions = ["Tell me a nature secret", "What lives in my neighborhood?", "How do I start exploring?"]
                 else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "How does this curriculum help children?", "Explain the role of biophilia"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "Explain the role of biophilia", "How do I use this guide?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -83,11 +83,12 @@ You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['c
 ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
 STRICT CONTENT RULES:
-1. NO MANDATORY QUESTIONS: Do not end your responses with a question unless you genuinely need new information.
-2. PUNCTUATION: Use question marks (?) for internal questions. Every response MUST end with a period (.).
-3. PEDAGOGY: For Parents/Teachers, focus on the "why" of the curriculum. Use <u>biophilia</u>, <u>scaffolding</u>, or <u>Reggio Emilia</u>.
-4. NO TRIVIAL DEFINITIONS: Do not underline or define common words like "relationship", "nature", or "observation" for adults.
+1. SAFETY INTEGRATION: Whenever you suggest a specific outdoor activity or a park (like Griffith Park) to a Student, you MUST include a reminder to go with a parent or trusted <u>Field Partner</u>. 
+2. PUNCTUATION: Every internal question must have a question mark (?). Every response MUST end with a period (.).
+3. NO THERAPY LOOPS: Do not end every response with a question. Focus on delivering curriculum insight.
+4. VOCABULARY: For Parents/Teachers, only define specialized terms (e.g., biophilia). Never define common words like "relationship" or "nature".
 5. CONCISE: 3-4 sentences maximum.
+6. UNDERLINE: Wrap 1-2 important curriculum terms in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -116,9 +117,9 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
     if p['role'] == 'Student':
-        intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you discover the amazing secrets of the world outside your door."
+        intro = f"Hi! I'm your nature mentor in {p['city']}. I can help you discover secrets about trees and animals, but remember that a <u>Field Partner</u> like a parent should always come with you when you explore."
     else:
-        intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
+        intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} through the Saving Planet Earth curriculum. We can discuss how to observe their interests to foster a deeper connection to nature."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -131,8 +132,9 @@ if query:
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
         res = res.strip()
-        # Clean up double periods or trailing question marks
-        res = re.sub(r'\?\s*$', '.', res)
+        # Enforce end-of-response period while protecting internal questions
+        if not res.endswith('.'):
+            res = re.sub(r'[\?\!]$', '.', res) if '?' not in res.split()[-1] else res
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
@@ -141,9 +143,9 @@ if query:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
             STRICT RULES:
-            - User asking AI.
+            - Perspective: User asking AI.
             - Never define: relationship, nature, observation, community, environment.
-            - Perspective: "How can I...", "Tell me more about...", "Why is...".
+            - Focus: "Tell me more about [underlined word]", "What is a Field Partner?", "How do trees share nutrients?".
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
@@ -152,8 +154,7 @@ if query:
             st.session_state.suggestions = data.get("prompts", [])
             
             new_defs = data.get("vocab", {})
-            # Stricter Filter for adults
-            blocklist = ["relationship", "nature", "observation", "community", "environment", "parents", "children"]
+            blocklist = ["relationship", "nature", "observation", "community", "environment"]
             for word, defn in new_defs.items():
                 w_lower = word.lower()
                 if any(u.lower() == w_lower for u in underlined):
