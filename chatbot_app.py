@@ -23,7 +23,8 @@ st.markdown("""
     <style>
     .stButton button { display: block; margin: 0 auto; padding: 8px 30px; border-radius: 15px; background-color: #2e7d32; color: white; border: none; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
-    .calendar-box { background-color: #f1f8e9; padding: 15px; border-radius: 10px; border-left: 5px solid #2e7d32; margin-bottom: 20px; }
+    .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
+    .safety-note { background-color: #fff3e0; padding: 15px; border-radius: 10px; border-left: 5px solid #ff9800; margin: 10px 0; font-weight: 500; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -43,7 +44,6 @@ if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "role": "Other", "age": 35, "child_age": None}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
 if "power_words" not in st.session_state: st.session_state.power_words = {}
-if "local_calendar" not in st.session_state: st.session_state.local_calendar = ""
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
@@ -55,7 +55,7 @@ if not st.session_state.onboarded:
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96813")
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96814")
         with c2:
             if u_role == "Student": u_age = st.number_input("Your Age", 3, 18, 10); c_age = None
             elif u_role == "Parent": u_age = 35; c_age = st.number_input("Child's Age", 1, 18, 5)
@@ -64,10 +64,13 @@ if not st.session_state.onboarded:
         if st.button("Start Exploring"):
             if z_code:
                 st.session_state.profile.update({"zip": z_code, "role": u_role, "age": u_age, "child_age": c_age})
-                # Fetch Local Calendar once
-                cal_p = f"Based on Zip Code {z_code} and today's date {datetime.now().strftime('%B %d')}, list 3 nature events (blooming, migration, or weather) for a {u_age if u_role=='Student' else c_age} year old. Keep it short."
-                cal_res = llm_model.invoke([("system", "You are a local naturalist."), ("human", cal_p)])
-                st.session_state.local_calendar = cal_res.content
+                defaults = {
+                    "Parent": ["How to start an observation?", "Fostering biophilia?", "Safety in nature?"],
+                    "Teacher": ["Implementing in class?", "Documentation tips?", "Local field study?"],
+                    "Student": [f"What's in my {z_code} backyard?", "Cool nature fact.", "How to stay safe while exploring?"],
+                    "Other": ["About the curriculum?", "Eco-Education?"]
+                }
+                st.session_state.suggestions = defaults.get(u_role, defaults["Other"])
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
@@ -79,38 +82,36 @@ is_student = p['role'] == "Student"
 target_age = p['age'] if is_student else p['child_age']
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor for Eco-Education.
-LOCATION: Zip Code {p['zip']}. You MUST acknowledge the specific plants, animals, and weather of this ZIP.
-ADAPTATION: Speak for a {target_age} year old. 
-- 10yo: Use "Nature's recycling" instead of "Decomposition".
-- 16yo: Use "Nutrient cycling" and "Symbiosis".
+You are a peer-like Socratic mentor.
+ZIP CODE: {p['zip']}. TARGET AUDIENCE: {target_age} year old.
 
 STRICT RULES:
-1. NO GEAR: Never tell users to buy items (flashlights, kits). Focus on what they can see/do for free.
-2. ZIP TRUTH: Only confirm sightings possible in {p['zip']}.
-3. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
-4. DISCRETION: Do NOT underline easy words (moss, garden, sun).
-5. NO BOT QUESTIONS: End with a statement.
+1. SAFETY FIRST: If a response involves animals that bite/sting (scorpions, centipedes, etc.) or dangerous environments (ocean, thick brush), you MUST include a safety note. 
+   - Format: Use <div class='safety-note'><b>⚠️ Safety Note:</b> [Instructions]</div>.
+   - Instructions should focus on "Look but don't touch" and "Always ask an adult."
+2. GEOGRAPHIC REALITY: Use {p['zip']} knowledge. No moose in Hawaii.
+3. NO BUYING: Never suggest buying tools. Focus on the five senses.
+4. ADAPTIVE: Calibrate language for {target_age} years old.
+5. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
+6. NO BOT QUESTIONS: End with a statement.
 """
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
-    st.markdown(f"### 📍 Nature in {p['zip']}")
-    st.markdown(f"<div class='calendar-box'>{st.session_state.local_calendar}</div>", unsafe_allow_html=True)
-    
-    st.title("Next Steps")
+    st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
     for s in st.session_state.suggestions:
-        if st.button(s, use_container_width=True): 
+        if st.button(s, key=f"btn_{s}", use_container_width=True): 
             st.session_state.user_query = s
             st.rerun()
             
     if st.session_state.power_words:
         st.divider()
-        st.subheader("📚 Power Words")
+        st.markdown("<span class='sidebar-label'>📚 Power Words</span>", unsafe_allow_html=True)
         for word, defn in list(st.session_state.power_words.items())[-5:]: 
             st.markdown(f"**{word}**: {defn}")
             
-    if st.button("🔄 Reset"):
+    st.divider()
+    if st.button("🔄 Reset Profile"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
@@ -120,7 +121,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['zip']} as a **{p['role']}**. What should we look for?"
+    intro = f"Ready to explore {p['zip']} as a **{p['role']}**. Remember to always explore with a buddy!"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -135,11 +136,13 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # Socratic Logic + Vocab Filter
         try:
-            target_desc = f"student who is {p['age']} years old" if is_student else f"parent of a {p['child_age']}yr old"
             found_underlines = re.findall(r'<u>(.*?)</u>', res)
-            u_res = llm_model.invoke([("system", f"Suggest 3 short Socratic prompts a {target_desc} would ask next about {p['zip']}. Define these words ONLY if they are difficult for age {target_age}: {found_underlines}. Discard easy words. Return JSON: {{'prompts': [], 'vocab': {{}}}}"), ("human", res)])
+            target_desc = f"student who is {p['age']} years old" if is_student else f"parent of a {p['child_age']}yr old"
+            u_res = llm_model.invoke([
+                ("system", f"Suggest 3 short Socratic questions a {target_desc} would ask next about the ecology and safety in {p['zip']}. Define these underlined words ONLY if they are difficult for age {target_age}: {found_underlines}. Discard easy words. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
+                ("human", res)
+            ])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
             st.session_state.power_words.update(data.get("vocab", {}))
