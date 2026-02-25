@@ -17,14 +17,22 @@ from langchain_core.output_parsers import StrOutputParser
 load_dotenv()
 DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
-st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
+st.set_page_config(page_title="Saving Planet Earth: The Ann Lewin-Benham Curriculum", layout="wide", page_icon="🌱")
 
 st.markdown("""
     <style>
     .stButton button { display: block; margin: 0 auto; padding: 8px 30px; border-radius: 15px; background-color: #2e7d32; color: white; border: none; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
-    .safety-note { background-color: #fff3e0; color: #432818; padding: 12px; border-radius: 8px; border-left: 5px solid #e65100; margin: 15px 0; }
+    .safety-note { 
+        background-color: #fff3e0; 
+        color: #432818; 
+        padding: 12px; 
+        border-radius: 8px; 
+        border-left: 5px solid #e65100; 
+        margin: 15px 0; 
+        font-weight: 500;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -41,7 +49,7 @@ def get_bot_chain(_api_key):
 # --- 3. SESSION STATE ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
-if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "city": "your area", "role": "Other", "age": 35, "child_age": None}
+if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "city": "your area", "role": "Other", "age": 35}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
@@ -51,21 +59,23 @@ retriever, llm_model = get_bot_chain(api_key)
 
 # --- 4. ONBOARDING ---
 if not st.session_state.onboarded:
-    st.markdown("<h1 style='text-align:center;'>Saving Planet Earth</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: The Ann Lewin-Benham Curriculum</h1>", unsafe_allow_html=True)
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         c1, c2 = st.columns(2)
         with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96814")
         with c2:
-            if u_role == "Student": u_age = st.number_input("Your Age", 3, 18, 10); c_age = None
-            elif u_role == "Parent": u_age = 35; c_age = st.number_input("Child's Age", 1, 18, 5)
-            else: u_age = 35; c_age = None
+            u_age = st.number_input("Your Age" if u_role == "Student" else "Child's Age", 3, 18, 10)
         
         if st.button("Start"):
             if z_code:
                 city_lookup = llm_model.invoke(f"Zip {z_code} city? Return ONLY City, State.").content
-                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age, "child_age": c_age})
-                st.session_state.suggestions = ["What lives in my backyard?", "Tell me a nature secret.", "How do I start exploring?"]
+                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
+                
+                if u_role == "Student":
+                    st.session_state.suggestions = ["What is hidden in my backyard?", "Tell me a nature secret.", "How to find tiny life?"]
+                else:
+                    st.session_state.suggestions = ["Socratic method tips?", "Explaining ecology to kids.", "Safety guidelines."]
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
@@ -73,26 +83,30 @@ if not st.session_state.onboarded:
 
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
-is_student = p['role'] == "Student"
-target_age = p['age'] if is_student else p['child_age']
+is_adult = p['role'] in ["Parent", "Teacher", "Other"]
+target_age = p['age']
+
+if is_adult:
+    ROLE_PROMPT = f"Speak as a pedagogical expert on the Ann Lewin-Benham curriculum. Use professional terminology like 'biophilia' and 'Socratic inquiry'."
+else:
+    ROLE_PROMPT = f"Speak as a peer-mentor for a {target_age} year old exploring the Ann Lewin-Benham curriculum. Use curious, investigative language."
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor for a {target_age} year old.
-LOCATION: {p['city']}.
+{ROLE_PROMPT}
+LOCATION: {p['city']}. 
 
 STRICT RULES:
-1. SOCRATIC STYLE: Use the Ann Lewin-Benham approach. Encourage looking, wondering, and documentation.
-2. ADAPTIVE LANGUAGE: Talk to a {target_age} year old. Use engaging but clear vocabulary.
-3. BE CONCISE BUT WARM: No long introductions. Use bullets for actions.
-4. SAFETY: If danger is possible, use <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions]</div>.
-5. NO ZIP CODES: Only use the city name "{p['city']}".
-6. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
-7. NO QUESTIONS: End your response with a definitive statement.
+1. GEOGRAPHIC REALISM: Only discuss species present in {p['city']}. If asked for moose in Hawaii, correct and pivot to local equivalents (e.g., Monk Seal).
+2. NO EASY WORDS: Do not define basic words (life, teamwork). Only underline 1-2 advanced scientific terms relevant to the conversation.
+3. CONVERSATIONAL: Never mention "Zip Code". Focus on real-world observation.
+4. SAFETY: Use <div class='safety-note'><b>⚠️ Safety:</b> [Instruction]</div> for any potential hazards.
+5. NO FILLER: Skip polite preamble like "Great question."
+6. NO BOT QUESTIONS: End with a statement.
 """
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
-    st.markdown("<span class='sidebar-label'>💡 Next Steps</span>", unsafe_allow_html=True)
+    st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
     for s in st.session_state.suggestions:
         if st.button(s, key=f"btn_{s}", use_container_width=True): 
             st.session_state.user_query = s
@@ -115,7 +129,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! What should we find first?"
+    intro = f"Ready to explore the Ann Lewin-Benham curriculum in {p['city']}! What should we find first?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -130,23 +144,20 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # IMPROVED DYNAMIC SUGGESTIONS
         try:
             found_underlines = re.findall(r'<u>(.*?)</u>', res)
-            # We pass the last exchange to make suggestions truly dynamic
+            audience = "adult" if is_adult else f"{target_age}yo child"
             update_p = f"""
-            The user just asked: "{query}"
-            The AI replied: "{res}"
-            
-            1. Generate 3 short, conversational follow-up questions for a {target_age}yo in {p['city']}.
-            2. They should be Socratic (e.g., "Where do the ants go?" not "Tell me about ants").
-            3. Define these words if they are new for a {target_age}yo: {found_underlines}.
-            
+            Audience: {audience}.
+            Conversation: "{query}" -> "{res}"
+            1. Generate 3 short Socratic "Suggested Prompts" for this audience.
+            2. Define only advanced scientific terms from: {found_underlines}. 
+            3. Ignore simple words.
             Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke(update_p)
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
-            st.session_state.power_words.update(data.get("vocab", {}))
+            st.session_state.power_words = data.get("vocab", {})
         except: pass
     st.rerun()
