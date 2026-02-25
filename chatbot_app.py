@@ -26,7 +26,6 @@ st.markdown("""
     .main-header { text-align: center; color: #2e7d32; margin-bottom: 5px; }
     .sub-header { text-align: center; color: #558b2f; font-style: italic; margin-bottom: 30px; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
-    .badge-card { background-color: #e8f5e9; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 25px; margin: 10px; border: 2px solid #2e7d32; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,8 +55,7 @@ def get_bot_chain(_api_key):
 # --- 3. SESSION STATE ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
-if "profile" not in st.session_state: 
-    st.session_state.profile = {"zip": None, "role": "Other", "age": 35, "child_age": None}
+if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "role": "Other", "age": 35, "child_age": None}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
@@ -84,10 +82,10 @@ if not st.session_state.onboarded:
             if z_code:
                 st.session_state.profile.update({"zip": z_code, "role": u_role, "age": u_age, "child_age": c_age})
                 defaults = {
-                    "Parent": ["How to start an observation?", "What is Meaning-FULL?", "Fostering biophilia?"],
-                    "Teacher": ["How to implement this in class?", "Documentation tips?", "Explain core pillars."],
-                    "Student": ["What can I explore today?", "Cool nature fact?", "How to start a journal?"],
-                    "Other": ["About the curriculum?", "Ann Lewin-Benham?", "What is Eco-Education?"]
+                    "Parent": ["How to start an observation?", "Fostering biophilia?", "Eco-Education pillars?"],
+                    "Teacher": ["Implementing in class?", "Documentation tips?", "Curriculum overview."],
+                    "Student": ["What can I explore in nature?", "Nature facts.", "Start a journal?"],
+                    "Other": ["About the curriculum?", "Eco-Education?"]
                 }
                 st.session_state.suggestions = defaults.get(u_role, defaults["Other"])
                 st.session_state.onboarded = True
@@ -101,17 +99,23 @@ is_student = p['role'] == "Student"
 target_age = p['age'] if is_student else p['child_age']
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
-CONTEXT: Role={p['role']}, User Age={p['age']}, Child Age={p['child_age']}, ZIP={p['zip']}.
+You are a peer-like Socratic mentor.
+USER ROLE: {p['role']}, USER AGE: {p['age']}, TARGET CHILD AGE: {p['child_age']}.
+LEVEL: Everything must be calibrated for a {target_age} year old.
 
-STRICT RULES:
-1. ADAPTIVE: Tailor language and advice to a {target_age} year old's comprehension level.
-2. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
-3. DISCRETION: ONLY underline words that are "stretch" vocabulary for the user. 
-   - For an Adult: ONLY underline technical curriculum pedagogy (e.g., <u>Biophilia</u>). 
-   - For a Student ({p['age']}yr): Underline scientific concepts they might not fully know yet.
-   - NEVER underline common, everyday words (e.g., moss, garden, green, child, observation). If the word is part of basic conversation for their age, do NOT underline it.
-4. NO BOT QUESTIONS: Do not end with a question.
+ADAPTATION GUIDELINES:
+- Age 3-7: Use sensory words (soft, cold, bright). Focus on shapes and colors.
+- Age 8-12: Use descriptive metaphors. Explain the "How" of nature (cycles, habits).
+- Age 13-18: Use scientific terminology and systems-thinking (interdependence, ecology).
+
+RULES:
+1. NATURE ONLY: Stay grounded in Earth ecology. No space/astronomy.
+2. NO BOT QUESTIONS: End with a statement, never a question.
+3. UNDERLINING: Wrap exactly 1-2 words in <u>word</u> tags.
+4. DISCRETION: ONLY underline words that are a "stretch" for a {target_age} year old.
+   - For an Adult: Only underline pedagogical theory (e.g., <u>Biophilia</u>).
+   - For a {target_age}yr old: Underline a scientific term they are learning (e.g., <u>Photosynthesis</u>).
+   - NEVER underline common words (moss, comet, garden, look, find, nature).
 """
 
 # --- 7. SIDEBAR ---
@@ -122,17 +126,12 @@ with st.sidebar:
             st.session_state.user_query = s
             st.rerun()
 
-    st.divider()
-    if is_student:
-        st.subheader("🏅 My Observation Badges")
-        badges = {"🌱": "Sprout Spotter", "🐦": "Bird Watcher", "☁️": "Cloud Reader", "🐞": "Bug Explorer", "🪨": "Rock Scientist"}
-        cols = st.columns(3)
-        for i, (emoji, name) in enumerate(badges.items()):
-            cols[i % 3].markdown(f"<div class='badge-card' title='{name}'>{emoji}</div>", unsafe_allow_html=True)
-    
     if st.session_state.power_words:
+        st.divider()
         st.subheader("📚 Power Words")
-        for word, defn in st.session_state.power_words.items(): 
+        # Keep only the last 5 words to prevent clutter
+        words_to_show = list(st.session_state.power_words.items())[-5:]
+        for word, defn in words_to_show: 
             st.markdown(f"**{word}**: {defn}")
     
     st.divider()
@@ -167,13 +166,8 @@ if query:
             target_desc = f"student who is {p['age']} years old" if is_student else f"parent of a {p['child_age']}yr old"
             update_p = f"""
             Identify 3 short questions the {target_desc} would logically ask the bot next.
-            Then, look at this list of underlined words: {found_underlines}.
-            
-            CRITICAL FILTER: 
-            Is the word common knowledge for a {target_desc}? 
-            If yes (e.g., 'moss', 'garden', 'low-maintenance'), DISCARD IT.
-            Only provide definitions for 'Stretch' or 'Power' words.
-            
+            Based on the age {target_age}, provide a simple, common-sense definition for these underlined words ONLY if they are difficult/new for that age: {found_underlines}.
+            If a word is easy (e.g. moss, green, garden), do NOT define it.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", res)])
