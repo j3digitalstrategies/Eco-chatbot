@@ -55,10 +55,11 @@ if not st.session_state.onboarded:
     st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
     
     with st.container():
-        u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
+        # MERGED DROPDOWN
+        u_role = st.selectbox("I am a...", ["Student", "Parent/Teacher"], index=0)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96815")
-        with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
+        with c2: u_age = st.number_input("Child's Age (or target student age)", 3, 100, 10)
         
         if st.button("Start Exploring"):
             if z_code:
@@ -68,7 +69,7 @@ if not st.session_state.onboarded:
                 if u_role == "Student":
                     st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
                 else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "How do I facilitate an inquiry?", "Explain documentation"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "How do I facilitate an inquiry?", "Explain the importance of documentation"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -78,18 +79,19 @@ if not st.session_state.onboarded:
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
 
-if p['role'] in ['Parent', 'Teacher']:
+if p['role'] == 'Parent/Teacher':
     ROLE_SPECIFIC_RULES = """
-    1. PEDAGOGY FIRST: You are a mentor teaching the 'Saving Planet Earth' textbook principles. Give concrete pedagogical ideas.
-    2. STOP THE PESTERING: Answer the user's question with substance. Do not keep asking 'What do you think?' or 'How does your child feel?' 
-    3. TEXTBOOK CONCEPTS: Explain how to use <u>documentation</u> (capturing words/photos) and <u>representation</u> (using clay, wire, or drawing) to help the child express their inquiry.
-    4. NO TOURISM: Do not suggest specific parks or local businesses.
+    1. PROFESSIONAL MENTOR: You are an expert in the 'Saving Planet Earth' curriculum pedagogy.
+    2. PEDAGOGY OVER RECREATION: Focus on <u>documentation</u>, <u>scaffolding</u>, and <u>representation</u>. 
+    3. NO SAFETY LECTURES: Never tell an adult to 'bring a parent' or 'stay safe.' 
+    4. SUBSTANCE OVER QUESTIONS: Provide concrete pedagogical strategies from the textbook.
+    5. CURRICULUM FOCUS: Discuss the 'subject of inquiry' and how to guide the child's analytic and collaborative behaviors.
     """
 else:
     ROLE_SPECIFIC_RULES = """
-    1. SAFETY: If the student suggests going outside, tell them to bring a parent/adult. 
-    2. NO TOUCHING: Remind them to observe wildlife from a distance.
-    3. AGE APPROPRIATE: Strictly refuse to discuss drugs or illegal substances.
+    1. SAFETY: Tell them to bring a parent/adult for outdoor activities.
+    2. NO TOUCHING: Remind them to observe from a distance.
+    3. AGE APPROPRIATE: No drugs or inappropriate content. Pivot to nature.
     """
 
 SYSTEM_BEHAVIOR = f"""
@@ -99,9 +101,9 @@ USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
 {ROLE_SPECIFIC_RULES}
 
 GENERAL RULES:
-5. NO THERAPY: Avoid asking more than ONE targeted question to build context.
-6. PUNCTUATION: Every response MUST end with a period (.) OR a question mark (?).
-7. CONCISE: 3-4 sentences maximum.
+6. NO THERAPY: Answer the user directly. Ask at most ONE targeted question to build context for a <u>subject of inquiry</u>.
+7. PUNCTUATION: Every response MUST end with a (.) OR a (?).
+8. CONCISE: 3-4 sentences maximum.
 """
 
 # --- 6. SIDEBAR ---
@@ -157,8 +159,8 @@ if query:
             suggest_prompt = f"""
             Generate exactly 3 short follow-up questions that the {p['role']} would ask the AI. 
             The questions MUST be from the user's perspective to the AI.
-            STRICT: Ensure prompts focus on pedagogical methods for Parent/Teacher roles.
-            Return JSON: {{"prompts": [], "vocab": {{}}}}
+            STRICT: If role is Parent/Teacher, focus on pedagogical methods.
+            Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
