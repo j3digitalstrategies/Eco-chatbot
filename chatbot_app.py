@@ -33,10 +33,13 @@ st.markdown("""
     }
     .welcome-text {
         text-align: center;
-        font-size: 1.3em;
+        font-size: 1.15em;
         color: #1b5e20;
-        margin-bottom: 20px;
-        font-weight: 500;
+        margin-bottom: 25px;
+        line-height: 1.5;
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
     }
     .main-header {
         text-align: center;
@@ -83,7 +86,7 @@ def get_bot_chain(_api_key):
 if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: 
-    st.session_state.profile = {"zip": None, "role": "Other", "age": 35} # Default adult age
+    st.session_state.profile = {"zip": None, "role": "Other", "age": 35}
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
 # --- 4. API & ENGINE INIT ---
@@ -91,24 +94,32 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 5. UNIFIED ONBOARDING ---
+# --- 5. PURPOSE-DRIVEN ONBOARDING ---
 if not st.session_state.onboarded:
     st.markdown("<h1 class='main-header'>Saving Planet Earth: Eco-Education Assistant</h1>", unsafe_allow_html=True)
     st.markdown("<h3 class='sub-header'>Based on the work of Ann Lewin-Benham</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='welcome-text'>Ready to explore our planet? Tell us about your journey!</p>", unsafe_allow_html=True)
+    
+    st.markdown("""
+        <p class='welcome-text'>
+        To help your mentor understand the nature right outside your door and tailor 
+        the conversation to your needs, please share your location and role below.
+        </p>
+        """, unsafe_allow_html=True)
     
     with st.container():
-        # Layout depends on if Student is selected
+        # Adjust columns based on role to keep UI centered
+        u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
+        
         c1, c2 = st.columns([1, 1])
         with c1:
             z_code = st.text_input("Zip Code", placeholder="e.g. 91231")
-        with c2:
-            u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         
-        # Only show age if Student is selected
-        u_age = 35 # Default for Adult
-        if u_role == "Student":
-            u_age = st.number_input("How old are you?", min_value=3, max_value=100, value=10)
+        with c2:
+            if u_role == "Student":
+                u_age = st.number_input("How old are you?", min_value=3, max_value=100, value=10)
+            else:
+                u_age = 35 # Silent default for adults
+                st.write("") # Keep alignment
         
         st.write("") 
         if st.button("Start Exploring"):
