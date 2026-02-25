@@ -52,6 +52,16 @@ st.markdown("""
         font-style: italic;
         margin-bottom: 30px;
     }
+    /* Centering the selectbox and inputs */
+    [data-testid="stVerticalBlock"] > div:has(div.stSelectbox) {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .centered-container {
+        display: flex;
+        justify-content: center;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -101,25 +111,25 @@ if not st.session_state.onboarded:
     
     st.markdown("""
         <p class='welcome-text'>
-        To help your mentor understand the nature right outside your door and tailor 
+        To help us understand the nature right outside your door and tailor 
         the conversation to your needs, please share your location and role below.
         </p>
         """, unsafe_allow_html=True)
     
-    with st.container():
-        # Adjust columns based on role to keep UI centered
+    # Selection logic for layout
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         
-        c1, c2 = st.columns([1, 1])
+        c1, c2 = st.columns(2)
         with c1:
             z_code = st.text_input("Zip Code", placeholder="e.g. 91231")
-        
         with c2:
             if u_role == "Student":
                 u_age = st.number_input("How old are you?", min_value=3, max_value=100, value=10)
             else:
-                u_age = 35 # Silent default for adults
-                st.write("") # Keep alignment
+                u_age = 35 # Hidden default
+                st.write("") # Alignment spacer
         
         st.write("") 
         if st.button("Start Exploring"):
@@ -128,7 +138,7 @@ if not st.session_state.onboarded:
                 st.session_state.onboarded = True
                 st.rerun()
             else:
-                st.warning("Please enter a Zip Code so I can know your environment!")
+                st.warning("Please enter a Zip Code so we can know your environment!")
     st.stop()
 
 # --- 6. BEHAVIOR ---
@@ -139,12 +149,12 @@ CONTEXT: Role={p['role']}, Age={p['age']}, ZIP={p['zip']}.
 
 STRICT RULES:
 1. BREVITY: Max 2 short paragraphs.
-2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
+2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate.
 3. ADAPTIVE LANGUAGE: 
    - Age < 10: Simple metaphors. 
    - Age 10-15: Clear scientific terms. 
-   - Role Adult (Parent/Teacher/Other): Professional, pedagogical, and based on Ann Lewin-Benham's theories.
-4. POWER WORDS: Do NOT define common words. Only 'stretch' words relative to a {p['age']} year old.
+   - Adult: Professional/Pedagogical based on Ann Lewin-Benham's curriculum.
+4. POWER WORDS: Only extract 'stretch' words relative to age {p['age']}. No common words.
 """
 
 # --- 7. SIDEBAR ---
@@ -198,13 +208,9 @@ if query:
         
         try:
             update_p = f"""
-            Analyze: '{full_res}'. User Role: {p['role']}, Age: {p['age']}.
-            Select 1-2 'Power Words'. 
-            CRITICAL: 
-            - If Adult, extract pedagogical/curriculum theory terms.
-            - If Student, extract 'stretch' scientific terms for age {p['age']}.
-            - NO common words.
-            Return JSON: {{"vocab": {{"word": "simple definition"}}}}
+            Analyze: '{full_res}'. Role: {p['role']}, Age: {p['age']}.
+            Select 1-2 'Power Words' that are a challenge/stretch for a {p['age']} year old.
+            Return JSON: {{"vocab": {{"word": "definition"}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(u_res.content)
