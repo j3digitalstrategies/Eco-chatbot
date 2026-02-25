@@ -48,10 +48,11 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 4. ONBOARDING ---
+# --- 4. ONBOARDING (RESTORING PREAMBLE) ---
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
     
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
@@ -65,9 +66,9 @@ if not st.session_state.onboarded:
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
                 if u_role == "Student":
-                    st.session_state.suggestions = ["What are the secrets of the trees?", "How do I become an explorer?", "Tell me a nature secret"]
+                    st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
                 else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "Explain biophilia", "How do I use this guide?"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "Explain the role of biophilia", "How do I use this guide?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -78,14 +79,15 @@ if not st.session_state.onboarded:
 p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
-You are an expert nature mentor. Location: {p['city']}. ROLE: {p['role']}. AGE: {p['age']}.
+You are an expert nature mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
-STRICT RULES:
+STRICT CONTENT RULES:
 1. SAFETY: If you suggest a Student go to a park or outside, simply mention they should bring a parent or adult.
-2. NO THERAPY: Provide curriculum facts and insights. Only ask a question if you need more info to help.
+2. NO THERAPY: Focus on curriculum insights. Avoid ending every message with a question.
 3. PUNCTUATION: Every response must end with a period (.). Internal questions must have a (?).
-4. ADULT VOCAB: Do not define common words like "relationship" or "nature" for Adults. Only define curriculum terms like <u>biophilia</u>.
-5. CONCISE: 3 sentences maximum.
+4. ADULT VOCAB: For Adults, only define specialized terms (e.g., <u>biophilia</u>). Never define common words like "relationship" or "nature".
+5. CONCISE: 3-4 sentences maximum.
 """
 
 # --- 6. SIDEBAR ---
@@ -116,7 +118,7 @@ if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
-        intro = f"Welcome. I'm here to help you guide a {p['age']}-year-old through the Saving Planet Earth curriculum in {p['city']}."
+        intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -128,7 +130,7 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
-        # Regex to force final period while keeping internal question marks.
+        # Ensure final period while preserving internal question marks
         if not res.endswith('.'):
              res = re.sub(r'[\?\!\.]$', '', res) + "."
         st.markdown(res, unsafe_allow_html=True)
@@ -138,8 +140,8 @@ if query:
         try:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
-            - User asks AI. No "How do you..." or answering for the AI.
-            - Definitions for: {underlined}.
+            - User asks AI. No answering for the AI.
+            - Focus: "Tell me more about [underlined word]", "How do trees help the air?", "What can I find in {p['city']}?".
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
