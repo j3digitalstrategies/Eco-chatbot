@@ -65,7 +65,6 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # These are things the USER might want to ask first
                 if u_role == "Student":
                     st.session_state.suggestions = ["Tell me a nature secret", "What lives in my neighborhood?", "How do I start exploring?"]
                 else:
@@ -84,13 +83,13 @@ You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['c
 USER ROLE: {p['role']}. USER AGE: {p['age']}.
 
 STRICT RULES:
-1. USER PERSPECTIVE: The "Suggested Prompts" (generated in post-processing) must ONLY be questions the user asks YOU. 
-2. NO SCRIPTING: Never generate a prompt that answers your own questions (e.g., no "Yes I have", no "My child likes...").
-3. INQUIRY IN BODY: You may ask the user about their interests in the main chat response, but do not provide specific activities until they answer.
-4. PEDAGOGY: For Parents/Teachers, reference <u>biophilia</u>, <u>scaffolding</u>, or <u>observation</u>.
+1. RESPONSE STRUCTURE: You may ask the user questions in the middle of your text to learn about their interests. 
+2. NO SUGGESTION ANSWERS: The "Suggested Prompts" (post-processing) are ONLY for the user to ask YOU questions. Never generate a prompt where the user answers you.
+3. PEDAGOGY: For Parents/Teachers, use <u>biophilia</u>, <u>scaffolding</u>, or <u>Reggio Emilia</u>. 
+4. RELATABILITY: Peer explorer tone for Students (age {p['age']}).
 5. CONCISE: 3-4 sentences. 
-6. NO END QUESTIONS: End with a statement. Put your question in the middle.
-7. UNDERLINE: Wrap 1-2 important curriculum terms in <u>word</u> tags.
+6. ENDING: Always end with a full-stop statement. Ensure any question in the middle has a question mark.
+7. UNDERLINE: Wrap 1-2 important terms in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -130,19 +129,20 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
+        # Improved Regex: Only replace a question mark if it is the VERY LAST character of the entire string
         res = re.sub(r'\?\s*$', '.', res.strip())
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # 8. POST-RESPONSE (PROMPTS & PERSISTENT VOCAB)
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
             STRICT RULES:
-            - The user is asking the AI. (e.g. "How does this apply to...")
-            - NEVER answer the AI's questions. 
-            - NEVER start with "I like", "Yes", or "The child".
+            - PERSPECTIVE: These are questions the USER asks the AI to get more information.
+            - NO ANSWERS: Never generate prompts that answer the AI's questions. 
+            - NO HALLUCINATIONS: Do not start with "How do you..." or "What have you tried...".
+            - EXAMPLES: "Tell me more about [term]", "How does [theory] help my child?", "Give me an example of [activity]".
             - Provide definitions for these underlined words: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
@@ -151,7 +151,6 @@ if query:
             
             st.session_state.suggestions = data.get("prompts", [])
             
-            # Persistent Sidebar Logic
             new_defs = data.get("vocab", {})
             for word, defn in new_defs.items():
                 if any(u.lower() == word.lower() for u in underlined):
