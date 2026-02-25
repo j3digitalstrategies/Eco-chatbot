@@ -57,7 +57,7 @@ if not st.session_state.onboarded:
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96815")
         with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
         
         if st.button("Start Exploring"):
@@ -68,7 +68,7 @@ if not st.session_state.onboarded:
                 if u_role == "Student":
                     st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
                 else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "Explain biophilia", "How do I start an inquiry?"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "How do I facilitate an inquiry?", "Explain documentation"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -78,18 +78,29 @@ if not st.session_state.onboarded:
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
 
-SYSTEM_BEHAVIOR = f"""
-You are an expert nature mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. AGE: {p['age']}.
+# Adult vs Student specific behavior instructions
+if p['role'] in ['Parent', 'Teacher']:
+    ROLE_SPECIFIC_RULES = """
+    1. PEDAGOGY ONLY: You are a mentor teaching an adult how to use the 'Saving Planet Earth' curriculum. 
+    2. NO TOURISM: Do not suggest specific parks, beaches, or commercial locations. Focus on the 'subject of inquiry'.
+    3. TEXTBOOK FOCUS: Use principles like <u>documentation</u>, <u>scaffolding</u>, and <u>representation</u>. 
+    4. NO SAFETY LECTURES: Do not tell the adult to 'bring an adult' or 'stay safe'. They are the authority.
+    """
+else:
+    ROLE_SPECIFIC_RULES = """
+    1. SAFETY: If the student suggests going outside, tell them to bring a parent/adult. 
+    2. NO TOUCHING: Remind them to observe wildlife from a distance.
+    3. LOCAL ONLY: Focus on animals they can actually find in their city.
+    """
 
-STRICT STUDENT SAFETY RULES:
-1. NO TOUCHING: If a Student suggests touching a wild animal, tell them NEVER to touch wildlife and observe from a distance.
-2. ADULT REQUIRED: If a Student says they are "going" somewhere or asks to find an animal, you MUST tell them they need a parent or adult with them.
-3. GEOGRAPHY: Be honest about {p['city']}. 
+SYSTEM_BEHAVIOR = f"""
+You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
+
+{ROLE_SPECIFIC_RULES}
 
 GENERAL RULES:
-4. ADULT AUTHORITY: If the user is a Parent/Teacher, NEVER tell them to "bring a parent."
-5. NO THERAPY: Answer the question directly. Only ask ONE follow-up question about interests to help recommend a <u>subject of inquiry</u>.
+5. NO THERAPY: Answer directly. Ask ONE question about the child's interest to establish a <u>subject of inquiry</u>.
 6. PUNCTUATION: Every response MUST end with a period (.) OR a question mark (?). Internal questions MUST have a question mark (?).
 7. CONCISE: 3 sentences maximum.
 """
@@ -122,7 +133,8 @@ if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
-        intro = f"Welcome. I'm here to support you in mentoring a {p['age']}-year-old in {p['city']} through the curriculum principles of <u>biophilia</u> and inquiry."
+        # RESTORED ORIGINAL FIRST PROMPT
+        intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -135,7 +147,7 @@ if query:
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
         
-        # --- FINAL PUNCTUATION FIX ---
+        # FINAL PUNCTUATION FIX
         if not (res.endswith('.') or res.endswith('?')):
             res += "."
         
@@ -144,12 +156,11 @@ if query:
         
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
-            # FIXED: Explicitly forcing User-to-AI perspective for prompts
             suggest_prompt = f"""
-            Generate exactly 3 short follow-up questions for a {p['role']}. 
-            These must be questions the USER asks the AI. 
-            Example: "How can I see X?", "What is <u>biophilia</u>?"
-            Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
+            Generate exactly 3 short follow-up questions that the {p['role']} would ask the AI. 
+            The questions MUST be from the user's perspective to the AI.
+            STRICT: Do NOT generate questions for the AI to ask the user.
+            Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
