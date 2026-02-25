@@ -78,19 +78,18 @@ if not st.session_state.onboarded:
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
 
-# Adult vs Student specific behavior instructions
 if p['role'] in ['Parent', 'Teacher']:
     ROLE_SPECIFIC_RULES = """
     1. PEDAGOGY ONLY: You are a mentor teaching an adult how to use the 'Saving Planet Earth' curriculum. 
-    2. NO TOURISM: Do not suggest specific parks, beaches, or commercial locations. Focus on the 'subject of inquiry'.
+    2. NO TOURISM: Do not suggest specific parks, beaches, or commercial locations.
     3. TEXTBOOK FOCUS: Use principles like <u>documentation</u>, <u>scaffolding</u>, and <u>representation</u>. 
-    4. NO SAFETY LECTURES: Do not tell the adult to 'bring an adult' or 'stay safe'. They are the authority.
+    4. NO SAFETY LECTURES: Do not tell the adult to 'bring an adult'.
     """
 else:
     ROLE_SPECIFIC_RULES = """
     1. SAFETY: If the student suggests going outside, tell them to bring a parent/adult. 
     2. NO TOUCHING: Remind them to observe wildlife from a distance.
-    3. LOCAL ONLY: Focus on animals they can actually find in their city.
+    3. AGE APPROPRIATE: Strictly refuse to discuss drugs, marijuana, mushrooms, or illegal substances. Pivot immediately back to nature (birds, trees, insects).
     """
 
 SYSTEM_BEHAVIOR = f"""
@@ -101,7 +100,7 @@ USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
 GENERAL RULES:
 5. NO THERAPY: Answer directly. Ask ONE question about the child's interest to establish a <u>subject of inquiry</u>.
-6. PUNCTUATION: Every response MUST end with a period (.) OR a question mark (?). Internal questions MUST have a question mark (?).
+6. PUNCTUATION: Every response MUST end with a period (.) OR a question mark (?).
 7. CONCISE: 3 sentences maximum.
 """
 
@@ -133,7 +132,6 @@ if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
-        # RESTORED ORIGINAL FIRST PROMPT
         intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
@@ -159,7 +157,7 @@ if query:
             suggest_prompt = f"""
             Generate exactly 3 short follow-up questions that the {p['role']} would ask the AI. 
             The questions MUST be from the user's perspective to the AI.
-            STRICT: Do NOT generate questions for the AI to ask the user.
+            STRICT: If the user asked about drugs or inappropriate content, DO NOT generate suggestions for that topic. Pivot to trees/birds.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
