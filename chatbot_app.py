@@ -24,10 +24,6 @@ st.markdown("""
     .stButton button { display: block; margin: 0 auto; padding: 8px 30px; border-radius: 15px; background-color: #2e7d32; color: white; border: none; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
-    .safety-banner { 
-        background-color: #fff3e0; color: #d35400; padding: 10px; border-radius: 10px; 
-        border: 2px solid #e67e22; font-weight: bold; margin-bottom: 15px; text-align: center;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -66,36 +62,35 @@ if not st.session_state.onboarded:
         
         if st.button("Start Exploring"):
             if z_code:
-                # Lookup city based on Zip Code provided
                 city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
+                # These are prompts for the USER to ask the BOT.
                 if u_role == "Student":
-                    st.session_state.suggestions = [f"What animals live in {city_lookup}?", "How do I spot local nature?", "What should I bring outside?"]
+                    st.session_state.suggestions = ["What animals live near me?", "How do I spot nature secrets?", "What should I bring on a nature walk?"]
                 else:
-                    st.session_state.suggestions = ["How do I foster biophilia?", "Observation tips", "Curriculum details"]
+                    st.session_state.suggestions = ["How do I start observing my child?", "What does 'Environment as Teacher' mean?", "How do I encourage curiosity?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
     st.stop()
 
-# --- 5. BEHAVIOR ---
+# --- 5. BEHAVIOR (ENFORCED INQUIRY FOR ALL ROLES) ---
 p = st.session_state.profile
-age = p['age']
 
 SYSTEM_BEHAVIOR = f"""
 You are a mentor for the Saving Planet Earth curriculum. 
-STRICT LOCATION: {p['city']} (Zip: {p['zip']}). 
-USER ROLE: {p['role']}. USER AGE: {age}.
+LOCATION: {p['city']}. ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
-STRICT RULES:
-1. DYNAMIC GEOGRAPHY: You must ONLY talk about nature and wildlife that exists in {p['city']}. If a user mentions an animal or plant not native to {p['city']}, you must gently correct them and provide a real local alternative.
-2. SAFETY FIRST: Every outdoor suggestion MUST include the warning: "Ask a parent or adult first before heading out."
-3. ASK BEFORE ADVISING: Ask the user what they like to do or what their local yard/park is like in the middle of your response.
-4. BE CONCISE: Max 2 sentences. No academic jargon for students.
-5. NO END QUESTIONS: End with a supportive statement.
-6. UNDERLINE: Wrap 1-2 'Power Words' in <u>word</u> tags.
+STRICT RULES FOR ALL PROFILES:
+1. LEARN FIRST: You must never suggest an activity, tool, or pedagogical tip without first asking the user for context about the child's interests, current hobbies, or their specific outdoor/indoor environment.
+2. NO ASSUMPTIONS: Do not assume you know what the child likes. You must ask.
+3. CONTEXTUAL BRIDGING: Once the user provides info, bridge their specific interest to a <u>pedagogical</u> concept (for adults) or a local nature fact (for students).
+4. SAFETY: Always include "Ask a parent or adult first before heading out" if discussing outdoor exploration.
+5. GEOGRAPHY: Only discuss wildlife/plants native to {p['city']}.
+6. CONCISE: Max 2 sentences. No jargon for students.
+7. NO END QUESTIONS: End with a statement. Place your question in the middle.
 """
 
 # --- 6. SIDEBAR ---
@@ -123,7 +118,10 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! What do you like to do most when you're outside?"
+    if p['role'] == 'Student':
+        intro = f"Hi! I'm ready to explore {p['city']} with you. What do you like to do most when you're outside?"
+    else:
+        intro = f"Welcome! To help me provide the best guidance for {p['city']}, could you tell me what the child is currently most interested in or what their typical play looks like?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -136,20 +134,15 @@ if query:
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
         res = re.sub(r'\?\s*$', '.', res.strip())
-        
-        # Mandatory Safety Warning
-        if any(w in res.lower() for w in ["outside", "explore", "walk", "yard", "park"]):
-            st.markdown("<div class='safety-banner'>⚠️ Always ask an adult before going outside!</div>", unsafe_allow_html=True)
-
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
             suggest_prompt = f"""
-            Generate 3 SHORT questions the {p['role']} (Age {age}) would ask about nature in {p['city']}.
-            STRICT RULE: Factual accuracy for {p['city']}. 
-            Student prompts must be curious. Parent prompts must be about <u>scaffolding</u> or <u>biophilia</u>.
+            Generate 3 SHORT questions the {p['role']} would ask the chatbot.
+            STRICT RULE: Perspective of the {p['role']}.
+            If the AI just asked a question, one prompt should be the user answering (e.g., "The child loves building blocks").
             Include definitions ONLY for: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
