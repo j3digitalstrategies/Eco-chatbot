@@ -91,7 +91,7 @@ def get_bot_chain(_api_key):
 # --- 3. ROLE DEFAULTS ---
 DEFAULT_PROMPTS = {
     "Parent": ["How do I start an observation?", "What is Meaning-FULL conversation?", "How to foster biophilia?"],
-    "Teacher": ["Classroom implementation?", "Documentation strategies?", "What are the core pillars?"],
+    "Teacher": ["How to implement this in class?", "What are documentation strategies?", "Explain the core pillars."],
     "Student": ["What can I explore today?", "Tell me a cool nature fact.", "How do I start a nature journal?"],
     "Other": ["Tell me about the curriculum.", "Who is Ann Lewin-Benham?", "What is Eco-Education?"]
 }
@@ -101,7 +101,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: 
     st.session_state.profile = {"zip": None, "role": "Other", "age": 35}
-if "suggestions" not in st.session_state: st.session_state.suggestions = DEFAULT_PROMPTS["Other"]
+if "suggestions" not in st.session_state: st.session_state.suggestions = []
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
 # --- 5. API & ENGINE INIT ---
@@ -131,6 +131,7 @@ if not st.session_state.onboarded:
         if st.button("Start Exploring"):
             if z_code:
                 st.session_state.profile.update({"zip": z_code, "role": u_role, "age": u_age})
+                # Set initial role-based suggestions
                 st.session_state.suggestions = DEFAULT_PROMPTS[u_role]
                 st.session_state.onboarded = True
                 st.rerun()
@@ -146,14 +147,10 @@ CONTEXT: Role={p['role']}, Age={p['age']}, ZIP={p['zip']}.
 
 STRICT RULES:
 1. BREVITY: Max 2 short paragraphs.
-2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
-3. ADAPTIVE LANGUAGE: 
-   - Adults (Parent/Teacher): Professional and pedagogical. Do NOT define common words.
-   - Students: Age-appropriate metaphors or scientific terms.
-4. UNDERLINING & POWER WORDS: 
-   - You MUST wrap 1-2 key pedagogical or scientific terms per response in <u>word</u> tags.
-   - ONLY underline words you are currently explaining or using in the text.
-   - For adults, ONLY underline curriculum-specific terms (e.g., <u>Meaning-FULL</u>).
+2. LOCAL TRUTH: Use ZIP {p['zip']} for local ecology context without stating the code.
+3. ADAPTIVE LANGUAGE: {p['role']} perspective. Adults get pedagogical terms; Students get metaphors.
+4. UNDERLINING: You MUST wrap 1-2 key terms per response in <u>word</u> tags.
+5. NO BOT QUESTIONS: Never end your response with a question for the user.
 """
 
 # --- 8. SIDEBAR ---
@@ -167,7 +164,6 @@ with st.sidebar:
     if st.session_state.power_words:
         st.divider()
         st.subheader("📚 Power Words")
-        # Sort words so they appear alphabetically or by most recent
         for word, defn in st.session_state.power_words.items():
             st.markdown(f"**{word}**: {defn}")
     
@@ -214,25 +210,21 @@ if query:
         st.markdown(full_res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         
-        # 1. FIND UNDERLINED WORDS IN THE ACTUAL TEXT
         found_underlines = re.findall(r'<u>(.*?)</u>', full_res)
         
         try:
             update_p = f"""
-            Task:
-            1. Suggest 3 short user follow-up questions for a {p['role']}.
-            2. Provide curriculum-specific definitions ONLY for these words found in the text: {found_underlines}.
+            1. Suggest 3 short questions the {p['role']} should ask the chatbot next based on the response.
+               (Rules: Teacher asks about pedagogy/class; Parent asks about home/activities; Student asks 'why/how'.)
+            2. Define these terms: {found_underlines}.
             
-            Return ONLY JSON: {{"prompts": [], "vocab": {{"word": "definition"}}}}
+            Return JSON: {{"prompts": ["Question?", "Question?", "Question?"], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", full_res)])
             data = json.loads(u_res.content)
             
-            # 2. STRICT FILTER: Only add word to session state if it was in 'found_underlines'
-            # This prevents "hidden" words or words from suggested prompts from entering the list.
-            valid_vocab = {k: v for k, v in data.get("vocab", {}).items() if k in found_underlines}
-            
             st.session_state.suggestions = data.get("prompts", [])
+            valid_vocab = {k: v for k, v in data.get("vocab", {}).items() if k in found_underlines}
             st.session_state.power_words.update(valid_vocab)
         except: pass
     st.rerun()
