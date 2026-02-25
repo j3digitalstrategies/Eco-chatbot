@@ -42,7 +42,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "city": "your area", "role": "Student", "age": 10}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
-if "master_power_words" not in st.session_state: st.session_state.master_power_words = {} # Persistent dictionary
+if "persistent_vocab" not in st.session_state: st.session_state.persistent_vocab = {} 
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
@@ -65,11 +65,11 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # Broad, non-specific initial prompts
+                # These are things the USER might want to ask first
                 if u_role == "Student":
                     st.session_state.suggestions = ["Tell me a nature secret", "What lives in my neighborhood?", "How do I start exploring?"]
                 else:
-                    st.session_state.suggestions = ["What is the main goal of this curriculum?", "Tell me about biophilia", "How do I use this app?"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "Explain biophilia", "How do I use this guide?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -81,16 +81,16 @@ p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
 You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
+USER ROLE: {p['role']}. USER AGE: {p['age']}.
 
-STRICT CONTENT RULES:
-1. THE WARM START: Do not force the "tell me about the child's play" question in your very first response. Start with a warm welcome and follow the user's lead.
-2. DELAYED INQUIRY: Only when the conversation turns toward specific activities or advice should you ask about the child's interests/hobbies/environment.
-3. PEDAGOGY: For Parents/Teachers, use terms like <u>biophilia</u> or <u>scaffolding</u>.
-4. RELATABILITY: For Students, speak as a peer using language for a {p['age']} year old.
-5. CONCISE: 3-4 sentences.
-6. NO END QUESTIONS: Place questions in the middle. End with a statement.
-7. UNDERLINE: Wrap 1-2 important terms in <u>word</u> tags.
+STRICT RULES:
+1. USER PERSPECTIVE: The "Suggested Prompts" (generated in post-processing) must ONLY be questions the user asks YOU. 
+2. NO SCRIPTING: Never generate a prompt that answers your own questions (e.g., no "Yes I have", no "My child likes...").
+3. INQUIRY IN BODY: You may ask the user about their interests in the main chat response, but do not provide specific activities until they answer.
+4. PEDAGOGY: For Parents/Teachers, reference <u>biophilia</u>, <u>scaffolding</u>, or <u>observation</u>.
+5. CONCISE: 3-4 sentences. 
+6. NO END QUESTIONS: End with a statement. Put your question in the middle.
+7. UNDERLINE: Wrap 1-2 important curriculum terms in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -101,10 +101,10 @@ with st.sidebar:
             st.session_state.user_query = s
             st.rerun()
             
-    if st.session_state.master_power_words:
+    if st.session_state.persistent_vocab:
         st.divider()
         st.markdown("<span class='sidebar-label'>📚 Power Words</span>", unsafe_allow_html=True)
-        for word, defn in st.session_state.master_power_words.items(): 
+        for word, defn in st.session_state.persistent_vocab.items(): 
             st.markdown(f"**{word}**: {defn}")
             
     st.divider()
@@ -134,22 +134,27 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
+        # 8. POST-RESPONSE (PROMPTS & PERSISTENT VOCAB)
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
             suggest_prompt = f"""
-            Generate 3 SHORT follow-up questions for a {p['role']}.
-            SIDEBAR VOCABULARY RULES:
-            - If Parent/Teacher: ONLY define pedagogy terms (scaffolding, etc). NEVER common words.
-            - If Student (Age {p['age']}): Define age-appropriate challenge words.
-            - NEVER define common nouns (meadow, squirrel).
+            Generate 3 follow-up questions for a {p['role']}.
+            STRICT RULES:
+            - The user is asking the AI. (e.g. "How does this apply to...")
+            - NEVER answer the AI's questions. 
+            - NEVER start with "I like", "Yes", or "The child".
+            - Provide definitions for these underlined words: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
+            
             st.session_state.suggestions = data.get("prompts", [])
             
-            # Persistent Update Logic: Update the master dict, don't replace it
-            new_vocab = {k: v for k, v in data.get("vocab", {}).items() if k.lower() in [w.lower() for w in underlined]}
-            st.session_state.master_power_words.update(new_vocab)
+            # Persistent Sidebar Logic
+            new_defs = data.get("vocab", {})
+            for word, defn in new_defs.items():
+                if any(u.lower() == word.lower() for u in underlined):
+                    st.session_state.persistent_vocab[word.lower()] = defn
         except: pass
     st.rerun()
