@@ -52,7 +52,6 @@ retriever, llm_model = get_bot_chain(api_key)
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
     
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
@@ -65,32 +64,33 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # These are prompts for the USER to ask the BOT.
+                # Initial "Inquiry" Starters - Things the USER asks the BOT
                 if u_role == "Student":
-                    st.session_state.suggestions = ["What animals live near me?", "How do I spot nature secrets?", "What should I bring on a nature walk?"]
+                    st.session_state.suggestions = [f"What animals live in {city_lookup}?", "How do I become a nature explorer?", "What are some nature secrets?"]
                 else:
-                    st.session_state.suggestions = ["How do I start observing my child?", "What does 'Environment as Teacher' mean?", "How do I encourage curiosity?"]
+                    st.session_state.suggestions = ["What does 'Environment as Teacher' mean?", "How do I start observing my child?", "How do I foster curiosity?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
     st.stop()
 
-# --- 5. BEHAVIOR (ENFORCED INQUIRY FOR ALL ROLES) ---
+# --- 5. BEHAVIOR ---
 p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
-You are a mentor for the Saving Planet Earth curriculum. 
-LOCATION: {p['city']}. ROLE: {p['role']}. TARGET AGE: {p['age']}.
+You are a mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. USER AGE: {p['age']}.
 
-STRICT RULES FOR ALL PROFILES:
-1. LEARN FIRST: You must never suggest an activity, tool, or pedagogical tip without first asking the user for context about the child's interests, current hobbies, or their specific outdoor/indoor environment.
-2. NO ASSUMPTIONS: Do not assume you know what the child likes. You must ask.
-3. CONTEXTUAL BRIDGING: Once the user provides info, bridge their specific interest to a <u>pedagogical</u> concept (for adults) or a local nature fact (for students).
-4. SAFETY: Always include "Ask a parent or adult first before heading out" if discussing outdoor exploration.
-5. GEOGRAPHY: Only discuss wildlife/plants native to {p['city']}.
-6. CONCISE: Max 2 sentences. No jargon for students.
-7. NO END QUESTIONS: End with a statement. Place your question in the middle.
+STRICT CONVERSATIONAL RULES:
+1. INVESTIGATE FIRST: You must ask the user about their hobbies, current interests, or environment before giving any activity ideas.
+2. SPEAK DIRECTLY:
+   - If Student: Speak to them as "You". Never use "the child".
+   - If Parent/Teacher: Speak to them as a partner.
+3. BE CONCISE: Max 2 focused sentences.
+4. NO END QUESTIONS: Place your question in the middle of your response. End with a statement.
+5. SAFETY: Always mention "Ask an adult first before heading out" if discussing outdoor discovery.
+6. UNDERLINE: Wrap 1-2 'Power Words' in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -118,10 +118,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    if p['role'] == 'Student':
-        intro = f"Hi! I'm ready to explore {p['city']} with you. What do you like to do most when you're outside?"
-    else:
-        intro = f"Welcome! To help me provide the best guidance for {p['city']}, could you tell me what the child is currently most interested in or what their typical play looks like?"
+    intro = f"Hi! I'm ready to explore {p['city']}. What do you like to do most when you're outside?" if p['role'] == 'Student' else f"Welcome! To help me guide you in {p['city']}, what are some things the child is currently interested in?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -139,10 +136,15 @@ if query:
         
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
+            # FORCED FOLLOW-UP GENERATOR
             suggest_prompt = f"""
             Generate 3 SHORT questions the {p['role']} would ask the chatbot.
-            STRICT RULE: Perspective of the {p['role']}.
-            If the AI just asked a question, one prompt should be the user answering (e.g., "The child loves building blocks").
+            STRICT RULES:
+            - These must be things the user asks the AI to get more information.
+            - NEVER generate answers to the AI's questions. 
+            - NEVER start with "I like", "The child likes", or "My interest is".
+            - Example Student: "What does that look like?" or "Tell me more about [topic]."
+            - Example Parent: "How can I support that?" or "What tools do I need?"
             Include definitions ONLY for: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
