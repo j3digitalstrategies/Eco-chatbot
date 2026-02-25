@@ -68,29 +68,43 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
+                # Initial role-based starters
                 if u_role == "Student":
-                    st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I found a cool animal!", "How do I become a nature explorer?"]
+                    st.session_state.suggestions = ["What's in my backyard?", "I found a cool animal!", "How do I start exploring?"]
                 else:
-                    st.session_state.suggestions = ["How do I foster biophilia?", "Tips for observing local nature", "Explain the 'Environment as Teacher' philosophy"]
+                    st.session_state.suggestions = ["How do I foster biophilia?", "Tips for observing local nature", "Explain 'Environment as Teacher'"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
     st.stop()
 
-# --- 5. BEHAVIOR ---
+# --- 5. BEHAVIOR (ENFORCED AGE-APPROPRIATENESS) ---
 p = st.session_state.profile
+age = p['age']
+
+# Logic to determine tone/complexity
+if p['role'] == "Student":
+    if age < 8:
+        level = "Very simple words, focus on magic, colors, and textures of nature. No big science terms."
+    elif age < 13:
+        level = "Fun and engaging, use clear science concepts like <u>habitat</u> or <u>energy</u>. No academic jargon."
+    else:
+        level = "Sophisticated and intellectual. Use high-level biology/physics concepts like <u>biodiversity</u> or <u>thermodynamics</u>."
+else:
+    level = "Professional, focusing on <u>pedagogy</u>, <u>biophilia</u>, and <u>scaffolding</u>."
+
 SYSTEM_BEHAVIOR = f"""
 You are a mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. 
+USER ROLE: {p['role']}. USER AGE: {age}.
+
+TONE & LEVEL: {level}
 
 STRICT RULES:
-1. ASK BEFORE ADVISING: Before providing specific activity ideas or curriculum help, you must ask the user about their specific situation (e.g., child's hobbies, classroom setup, or backyard type).
-2. BE CONCISE: Max 2-3 focused sentences.
-3. NO END QUESTIONS: End with a statement. Place your inquisitive question in the middle of your response.
-4. ADAPTIVE CONTENT: 
-   - Parents/Teachers: Focus on <u>biophilia</u> and <u>scaffolding</u>.
-   - Students: Focus on local discovery.
+1. ASK BEFORE ADVISING: Always ask the user about their specific situation (hobbies, garden, classroom) before offering tips.
+2. BE CONCISE: Max 2 sentences.
+3. NO END QUESTIONS: End with a statement. Place your question in the middle.
+4. ROLE LOCK: If role is Student, NEVER use adult terms like "biophilia" or "scaffolding" regardless of age.
 5. UNDERLINE: Wrap 1-2 'Power Words' in <u>word</u> tags.
 """
 
@@ -119,7 +133,10 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! To help me get started, what are some things your child loves to do or play with?" if p['role'] != 'Student' else f"Hi! I'm ready to explore {p['city']} with you. What do you like to do most when you're outside?"
+    if p['role'] == 'Student':
+        intro = f"Hi! I'm ready to explore {p['city']}. What do you like to do most when you're outside?"
+    else:
+        intro = f"Ready to explore {p['city']}! To get started, what are some things your child loves to do?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -131,7 +148,6 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
-        # Remove trailing question
         res = re.sub(r'\?\s*$', '.', res.strip())
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
@@ -139,8 +155,9 @@ if query:
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
             suggest_prompt = f"""
-            Generate 3 SHORT prompts for a {p['role']}.
-            STRICT RULE: Write these from the USER'S perspective (e.g., "How do I..." or "Tell me more about...").
+            Generate 3 SHORT prompts for a {p['role']} aged {age}.
+            STRICT RULE: Write from USER'S perspective.
+            Match the vocabulary level for a {age} year old.
             Include definitions ONLY for: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
