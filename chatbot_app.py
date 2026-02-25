@@ -42,7 +42,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "city": "your area", "role": "Student", "age": 10}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
-if "power_words" not in st.session_state: st.session_state.power_words = {}
+if "master_power_words" not in st.session_state: st.session_state.master_power_words = {} # Persistent dictionary
 
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
@@ -65,10 +65,11 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
+                # Broad, non-specific initial prompts
                 if u_role == "Student":
-                    st.session_state.suggestions = ["What animals live near me?", "How do I become a nature explorer?", "What are some nature secrets?"]
+                    st.session_state.suggestions = ["Tell me a nature secret", "What lives in my neighborhood?", "How do I start exploring?"]
                 else:
-                    st.session_state.suggestions = ["What is 'Environment as Teacher'?", "How do I start observing my child?", "How do I foster curiosity?"]
+                    st.session_state.suggestions = ["What is the main goal of this curriculum?", "Tell me about biophilia", "How do I use this app?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -79,16 +80,17 @@ if not st.session_state.onboarded:
 p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
-You are an expert mentor for the Saving Planet Earth curriculum. 
-LOCATION: {p['city']}. ROLE: {p['role']}. TARGET AGE: {p['age']}.
+You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
 STRICT CONTENT RULES:
-1. INVESTIGATION LOCK: You must not give activity instructions or specific lists until you know the user's/child's interests. 
-2. PEDAGOGY: For Parents/Teachers, reference concepts like <u>biophilia</u>, <u>scaffolding</u>, or the <u>Reggio Emilia</u> approach. Explain why activities are meaningful.
-3. RELATABILITY: For Students, speak as a peer explorer using language appropriate for a {p['age']} year old.
-4. CONCISE & RICH: 3-4 sentences.
-5. NO END QUESTIONS: End with a statement. Place your inquiry in the middle.
-6. UNDERLINE: Wrap 1-2 key terms in <u>word</u> tags.
+1. THE WARM START: Do not force the "tell me about the child's play" question in your very first response. Start with a warm welcome and follow the user's lead.
+2. DELAYED INQUIRY: Only when the conversation turns toward specific activities or advice should you ask about the child's interests/hobbies/environment.
+3. PEDAGOGY: For Parents/Teachers, use terms like <u>biophilia</u> or <u>scaffolding</u>.
+4. RELATABILITY: For Students, speak as a peer using language for a {p['age']} year old.
+5. CONCISE: 3-4 sentences.
+6. NO END QUESTIONS: Place questions in the middle. End with a statement.
+7. UNDERLINE: Wrap 1-2 important terms in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -99,10 +101,10 @@ with st.sidebar:
             st.session_state.user_query = s
             st.rerun()
             
-    if st.session_state.power_words:
+    if st.session_state.master_power_words:
         st.divider()
         st.markdown("<span class='sidebar-label'>📚 Power Words</span>", unsafe_allow_html=True)
-        for word, defn in st.session_state.power_words.items(): 
+        for word, defn in st.session_state.master_power_words.items(): 
             st.markdown(f"**{word}**: {defn}")
             
     st.divider()
@@ -116,7 +118,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Hi! I'm ready to explore {p['city']} with you. What do you like to do most when you're outside?" if p['role'] == 'Student' else f"Welcome! To help me guide you in {p['city']}, could you tell me about the child's current interests or what their play looks like?"
+    intro = f"Welcome! I am so excited to help you discover the nature of {p['city']}. Where would you like to begin our journey?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -135,19 +137,19 @@ if query:
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
             suggest_prompt = f"""
-            Generate 3 SHORT follow-up questions the {p['role']} would ask.
-            
+            Generate 3 SHORT follow-up questions for a {p['role']}.
             SIDEBAR VOCABULARY RULES:
-            - If role is Parent/Teacher: ONLY define curriculum/pedagogy terms (e.g., scaffolding, biophilia). Never define common words.
-            - If role is Student (Age {p['age']}): Define words that might be new or challenging for a child this age.
-            - If the word is a common noun (meadow, rabbit, squirrel), DO NOT define it for anyone.
-            
+            - If Parent/Teacher: ONLY define pedagogy terms (scaffolding, etc). NEVER common words.
+            - If Student (Age {p['age']}): Define age-appropriate challenge words.
+            - NEVER define common nouns (meadow, squirrel).
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
-            # Filter vocabulary to ensure only relevant words stay
-            st.session_state.power_words = {k: v for k, v in data.get("vocab", {}).items() if k.lower() in [w.lower() for w in underlined]}
+            
+            # Persistent Update Logic: Update the master dict, don't replace it
+            new_vocab = {k: v for k, v in data.get("vocab", {}).items() if k.lower() in [w.lower() for w in underlined]}
+            st.session_state.master_power_words.update(new_vocab)
         except: pass
     st.rerun()
