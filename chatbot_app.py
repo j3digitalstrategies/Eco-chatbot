@@ -57,7 +57,7 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 4. ONBOARDING (RE-LOCKED TO YOUR DESIGN) ---
+# --- 4. ONBOARDING (RESTORED DESIGN) ---
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
@@ -71,4 +71,96 @@ if not st.session_state.onboarded:
         
         if st.button("Start Exploring"):
             if z_code:
-                city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY
+                # FIXED: f-string syntax error resolved here
+                city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
+                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
+                
+                # Role-Based Initial Setup
+                if u_role == "Student":
+                    st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
+                elif u_role == "Parent":
+                    st.session_state.suggestions = ["How do I foster biophilia?", f"Observation tips for my {u_age}yo", "The 'Environment as Teacher' philosophy."]
+                elif u_role == "Teacher":
+                    st.session_state.suggestions = ["Classroom integration ideas", "Documenting student discoveries", "Nature & Literacy pedagogy"]
+                else:
+                    st.session_state.suggestions = ["Curriculum philosophy", f"Nature in {city_lookup}"]
+                
+                st.session_state.onboarded = True
+                st.rerun()
+            else: st.warning("Zip Code required!")
+    st.stop()
+
+# --- 5. BEHAVIOR ---
+p = st.session_state.profile
+SYSTEM_BEHAVIOR = f"""
+You are a peer-mentor for the Saving Planet Earth curriculum. 
+LOCATION: {p['city']}. 
+USER ROLE: {p['role']}. 
+
+STRICT RULES:
+1. NO QUESTIONS AT THE END: Do not end your response with any question. End with a supportive observation or pedagogical fact.
+2. ADAPTIVE CONTENT: 
+   - Parents/Teachers: Focus heavily on PEDAGOGY (biophilia, scaffolding, documentation).
+   - Students: Bridge hobbies (baseball, boogie boarding) to nature science.
+3. SMART SAFETY: No safety boxes unless an outdoor activity is proposed.
+4. FORMATTING: Underline 1-2 'Power Words' using <u>word</u> tags.
+"""
+
+# --- 6. SIDEBAR ---
+with st.sidebar:
+    st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
+    for idx, s in enumerate(st.session_state.suggestions):
+        if st.button(s, key=f"sug_{idx}_{hash(s)}", use_container_width=True): 
+            st.session_state.user_query = s
+            st.rerun()
+            
+    if st.session_state.power_words:
+        st.divider()
+        st.markdown("<span class='sidebar-label'>📚 Power Words</span>", unsafe_allow_html=True)
+        for word, defn in st.session_state.power_words.items(): 
+            st.markdown(f"**{word}**: {defn}")
+            
+    st.divider()
+    if st.button("🔄 Reset Profile"):
+        for k in list(st.session_state.keys()): del st.session_state[k]
+        st.rerun()
+
+# --- 7. CHAT ENGINE ---
+prompt_template = ChatPromptTemplate.from_messages([("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), MessagesPlaceholder(variable_name="chat_history"), ("human", "{input}")])
+rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)), "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]} | prompt_template | llm_model | StrOutputParser())
+
+for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
+if not st.session_state.messages:
+    intro = f"Ready to explore {p['city']}! How can I help you today?"
+    st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
+
+query = st.session_state.get("user_query") or st.chat_input("Type here...")
+if query:
+    if "user_query" in st.session_state: del st.session_state["user_query"]
+    st.session_state.messages.append({"role": "user", "content": query})
+    st.chat_message("user").markdown(query)
+    
+    hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
+    with st.chat_message("assistant"):
+        res = rag_chain.invoke({"input": query, "chat_history": hist})
+        # Regex to strip trailing questions
+        res = re.sub(r'\?\s*$', '.', res.strip())
+        st.markdown(res, unsafe_allow_html=True)
+        st.session_state.messages.append({"role": "assistant", "content": res})
+        
+        # Extraction logic for Vocabulary Sync
+        underlined = re.findall(r'<u>(.*?)</u>', res)
+        
+        try:
+            suggest_prompt = f"""
+            Based on the last response, generate 3 follow-up prompts for a {p['role']}.
+            STRICT RULE: Write these from the USER'S perspective.
+            Include definitions ONLY for these specific words: {underlined}.
+            Return JSON: {{"prompts": [], "vocab": {{}}}}
+            """
+            u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
+            data = json.loads(u_res.content)
+            st.session_state.suggestions = data.get("prompts", [])
+            st.session_state.power_words = {k: v for k, v in data.get("vocab", {}).items() if k.lower() in [w.lower() for w in underlined]}
+        except: pass
+    st.rerun()
