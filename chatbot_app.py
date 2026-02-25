@@ -80,16 +80,15 @@ p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
 You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. USER AGE: {p['age']}.
+ROLE: {p['role']}. TARGET AGE: {p['age']}.
 
 STRICT RULES:
-1. RESPONSE STRUCTURE: You may ask the user questions in the middle of your text to learn about their interests. 
-2. NO SUGGESTION ANSWERS: The "Suggested Prompts" (post-processing) are ONLY for the user to ask YOU questions. Never generate a prompt where the user answers you.
-3. PEDAGOGY: For Parents/Teachers, use <u>biophilia</u>, <u>scaffolding</u>, or <u>Reggio Emilia</u>. 
-4. RELATABILITY: Peer explorer tone for Students (age {p['age']}).
-5. CONCISE: 3-4 sentences. 
-6. ENDING: Always end with a full-stop statement. Ensure any question in the middle has a question mark.
-7. UNDERLINE: Wrap 1-2 important terms in <u>word</u> tags.
+1. END THERAPY MODE: Do not end every response with a question. Only ask a question if you genuinely lack the information needed to suggest a specific pedagogical path.
+2. CORRECT PUNCTUATION: Every sentence must end with appropriate punctuation. Use question marks (?) for questions and periods (.) for statements.
+3. NO REPETITIVE INQUIRY: If the user has already mentioned an interest (like horses), use it. Do not ask "What do you think" or "What does the child like" repeatedly.
+4. PEDAGOGY: For Parents/Teachers, reference <u>biophilia</u>, <u>scaffolding</u>, or <u>relationship</u>. Explain the "why" behind activities.
+5. CONCISE: 3-4 sentences.
+6. UNDERLINE: Wrap 1-2 important terms in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -129,8 +128,8 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
-        # Improved Regex: Only replace a question mark if it is the VERY LAST character of the entire string
-        res = re.sub(r'\?\s*$', '.', res.strip())
+        # Clean up double punctuation if any, but leave internal question marks alone
+        res = res.strip()
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
@@ -138,12 +137,11 @@ if query:
         try:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
-            STRICT RULES:
-            - PERSPECTIVE: These are questions the USER asks the AI to get more information.
-            - NO ANSWERS: Never generate prompts that answer the AI's questions. 
-            - NO HALLUCINATIONS: Do not start with "How do you..." or "What have you tried...".
-            - EXAMPLES: "Tell me more about [term]", "How does [theory] help my child?", "Give me an example of [activity]".
-            - Provide definitions for these underlined words: {underlined}.
+            RULES:
+            - User asking AI.
+            - Focus on deepening pedagogical or environmental knowledge.
+            - Never answer the AI.
+            - Provide definitions for: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
