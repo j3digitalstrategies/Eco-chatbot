@@ -117,48 +117,4 @@ with st.sidebar:
 prompt_template = ChatPromptTemplate.from_messages([("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), MessagesPlaceholder(variable_name="chat_history"), ("human", "{input}")])
 rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)), "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]} | prompt_template | llm_model | StrOutputParser())
 
-for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
-if not st.session_state.messages:
-    if p['role'] == 'Student':
-        intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
-    else:
-        intro = f"Welcome. I'm here to support you in mentoring a {p['age']}-year-old in {p['city']} through the curriculum principles of <u>biophilia</u> and inquiry."
-    st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
-
-query = st.session_state.get("user_query") or st.chat_input("Type here...")
-if query:
-    if "user_query" in st.session_state: del st.session_state["user_query"]
-    st.session_state.messages.append({"role": "user", "content": query})
-    st.chat_message("user").markdown(query)
-    
-    hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
-    with st.chat_message("assistant"):
-        res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
-        
-        # --- PRECISE PUNCTUATION FIX ---
-        # Only add a period if the sentence doesn't already end in a period or a question mark.
-        if not (res.endswith('.') or res.endswith('?')):
-            res += "."
-        
-        st.markdown(res, unsafe_allow_html=True)
-        st.session_state.messages.append({"role": "assistant", "content": res})
-        
-        underlined = re.findall(r'<u>(.*?)</u>', res)
-        try:
-            suggest_prompt = f"""
-            Generate 3 follow-up questions for a {p['role']}.
-            Return JSON: {{"prompts": [], "vocab": {{}}}}
-            """
-            u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
-            data = json.loads(u_res.content)
-            st.session_state.suggestions = data.get("prompts", [])
-            
-            new_defs = data.get("vocab", {})
-            blocklist = ["relationship", "nature", "observation", "community", "environment", "parent", "teacher"]
-            for word, defn in new_defs.items():
-                w_lower = word.lower()
-                if any(u.lower() == w_lower for u in underlined):
-                    if p['role'] != 'Student' and w_lower in blocklist: continue
-                    st.session_state.persistent_vocab[w_lower] = defn
-        except: pass
-    st.rerun()
+for m in st.session_state.messages: st.chat_message(
