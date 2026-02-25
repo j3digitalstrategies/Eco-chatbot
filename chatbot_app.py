@@ -24,7 +24,7 @@ st.markdown("""
     .stButton button { display: block; margin: 0 auto; padding: 8px 30px; border-radius: 15px; background-color: #2e7d32; color: white; border: none; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
-    .safety-note { background-color: #fff3e0; color: #432818; padding: 12px; border-radius: 8px; border-left: 5px solid #e65100; margin: 10px 0; font-size: 0.9em; }
+    .safety-note { background-color: #fff3e0; color: #432818; padding: 12px; border-radius: 8px; border-left: 5px solid #e65100; margin: 15px 0; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -63,9 +63,9 @@ if not st.session_state.onboarded:
         
         if st.button("Start"):
             if z_code:
-                city_lookup = llm_model.invoke(f"Zip {z_code} city? Return ONLY city/state.").content
+                city_lookup = llm_model.invoke(f"Zip {z_code} city? Return ONLY City, State.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age, "child_age": c_age})
-                st.session_state.suggestions = ["What's in my backyard?", "Nature facts.", "How to stay safe?"]
+                st.session_state.suggestions = ["What lives in my backyard?", "Tell me a nature secret.", "How do I start exploring?"]
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
@@ -77,16 +77,17 @@ is_student = p['role'] == "Student"
 target_age = p['age'] if is_student else p['child_age']
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like mentor for a {target_age} year old. 
-LOCATION: {p['city']}. 
+You are a peer-like Socratic mentor for a {target_age} year old.
+LOCATION: {p['city']}.
 
 STRICT RULES:
-1. BE BRIEF: Use short sentences and bullet points. No "fluff" or "filler" (e.g., skip "That's a great question!").
-2. CONVERSATIONAL: Never mention "Zip Code". Say "{p['city']}".
-3. SAFETY: Use <div class='safety-note'><b>⚠️ Safety:</b> [Clear instruction]</div> for bugs/water/climbing.
-4. NO BUYING: Focus on eyes and ears only.
-5. UNDERLINING: Wrap 1-2 'Power Words' in <u>word</u> tags.
-6. NO QUESTIONS: End with a statement.
+1. SOCRATIC STYLE: Use the Ann Lewin-Benham approach. Encourage looking, wondering, and documentation.
+2. ADAPTIVE LANGUAGE: Talk to a {target_age} year old. Use engaging but clear vocabulary.
+3. BE CONCISE BUT WARM: No long introductions. Use bullets for actions.
+4. SAFETY: If danger is possible, use <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions]</div>.
+5. NO ZIP CODES: Only use the city name "{p['city']}".
+6. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
+7. NO QUESTIONS: End your response with a definitive statement.
 """
 
 # --- 6. SIDEBAR ---
@@ -129,14 +130,19 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # LOGIC TO UPDATE SUGGESTIONS DYNAMICALLY
+        # IMPROVED DYNAMIC SUGGESTIONS
         try:
             found_underlines = re.findall(r'<u>(.*?)</u>', res)
+            # We pass the last exchange to make suggestions truly dynamic
             update_p = f"""
-            Based on this response: "{res}"
-            1. Suggest 3 short, curiosity-driven questions a {target_age}yo would ask next about {p['city']} nature. 
-            2. Define difficult words from this list: {found_underlines}.
-            Return ONLY JSON: {{"prompts": ["prop1", "prop2", "prop3"], "vocab": {{"word": "simple def"}}}}
+            The user just asked: "{query}"
+            The AI replied: "{res}"
+            
+            1. Generate 3 short, conversational follow-up questions for a {target_age}yo in {p['city']}.
+            2. They should be Socratic (e.g., "Where do the ants go?" not "Tell me about ants").
+            3. Define these words if they are new for a {target_age}yo: {found_underlines}.
+            
+            Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke(update_p)
             data = json.loads(u_res.content)
