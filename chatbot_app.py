@@ -32,7 +32,7 @@ st.markdown("""
         border-left: 5px solid #e65100; 
         margin: 15px 0; 
         line-height: 1.5;
-        font-weight: 500;
+        font-weight: bold;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -63,7 +63,6 @@ if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
     
-    # YOUR UPDATED PREAMBLE
     st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
     
     with st.container():
@@ -81,11 +80,12 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age, "child_age": c_age})
                 
+                # Initial prompts now focus on GATHERING info
                 defaults = {
-                    "Parent": ["How to start an observation?", "What is biophilia?", "Nature-based safety tips."],
-                    "Teacher": ["Implementing in class?", "Documentation tips?", "Explain curriculum."],
-                    "Student": ["What's in my backyard?", "Tell me a nature secret.", "How can I explore safely?"],
-                    "Other": ["About the curriculum?", "Eco-Education?"]
+                    "Parent": ["How do I help my child observe?", "What are some local nature goals?", "Safety tips for {city_lookup}."],
+                    "Teacher": ["How to document student interests?", "Classroom exploration goals."],
+                    "Student": ["I want to tell you about a cool animal I saw!", "What can we find in {city_lookup}?", "How do I become a nature explorer?"],
+                    "Other": ["About the curriculum?"]
                 }
                 st.session_state.suggestions = defaults.get(u_role, defaults["Other"])
                 st.session_state.onboarded = True
@@ -99,17 +99,25 @@ is_student = p['role'] == "Student"
 target_age = p['age'] if is_student else p['child_age']
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor for the Saving Planet Earth curriculum by Ann Lewin-Benham.
-LOCATION: {p['city']}. TARGET AUDIENCE: {target_age} year old level.
+You are a peer-like Socratic mentor for the Saving Planet Earth curriculum.
+LOCATION: {p['city']}. AUDIENCE: {target_age} year old level.
 
-STRICT CONVERSATION RULES:
-1. NATURAL SPEECH: NEVER mention the "Zip Code" {p['zip']}. Refer to "{p['city']}" or "your neighborhood." 
-2. GEOGRAPHIC REALISM: Only discuss species present in {p['city']}.
-3. ADAPTIVE TONE: Speak at a level perfect for {target_age} years old.
-4. SAFETY PROTOCOL: If you discuss hazards, use:
-   <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions]</div>.
-5. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags. Use ONLY advanced scientific terms.
-6. NO BOT QUESTIONS: End your response with a statement.
+CORE MISSION: INVESTIGATE BEFORE SUGGESTING.
+1. INQUIRY FIRST: Do not suggest a full activity until you know:
+   - What animals/plants they have ALREADY seen.
+   - What they are most curious about (birds? bugs? dirt? trees?).
+   - What their "Dream Discovery" would be in {p['city']}.
+2. ADAPTIVE LEARNING: Once you know their interests, tailor your advice to help them achieve that specific goal (e.g., "If you want to see a Monk Seal, here is how we can prepare...").
+
+STRICT SAFETY RULES:
+1. ADULT SUPERVISION: If the child mentions going outside, you MUST say: "Before you head out, make sure to ask an adult or parent to go with you!"
+2. NO BLINDFOLDS: Never suggest blindfolds.
+3. SAFETY BOX: Use for all outdoor hazards:
+   <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions: Stay with an adult, look but don't touch, keep distance from wildlife]</div>.
+
+FORMATTING:
+- Wrap 1-2 'Power Words' (advanced science terms) in <u>word</u> tags.
+- End with a statement, never a question.
 """
 
 # --- 6. SIDEBAR ---
@@ -137,7 +145,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! Let's discover what's waiting in your neighborhood."
+    intro = f"I'm so excited to explore {p['city']} with you! Before we start our adventure, tell me about something cool you've seen outside or an animal you're hoping to find."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -156,7 +164,7 @@ if query:
             found_underlines = re.findall(r'<u>(.*?)</u>', res)
             target_desc = f"student who is {p['age']} years old" if is_student else f"parent/teacher of a {p['child_age']}yr old"
             u_res = llm_model.invoke([
-                ("system", f"Suggest 3 natural Socratic prompts a {target_desc} would ask next about {p['city']}. Define these underlined words ONLY if they are advanced scientific terms: {found_underlines}. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
+                ("system", f"Suggest 3 natural Socratic prompts for a {target_desc} to share more about their interests or local sightings. Define underlined advanced scientific terms: {found_underlines}. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
                 ("human", res)
             ])
             data = json.loads(u_res.content)
