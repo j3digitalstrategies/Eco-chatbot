@@ -25,13 +25,7 @@ st.markdown("""
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
     .safety-note { 
-        background-color: #fff3e0; 
-        color: #432818; 
-        padding: 12px; 
-        border-radius: 8px; 
-        border-left: 5px solid #e65100; 
-        margin: 10px 0; 
-        font-size: 0.9em;
+        background-color: #fff3e0; color: #432818; padding: 12px; border-radius: 8px; border-left: 5px solid #e65100; margin: 10px 0; font-size: 0.9em;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -57,7 +51,7 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 4. ONBOARDING (RESTORED DESIGN) ---
+# --- 4. ONBOARDING ---
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
@@ -66,24 +60,18 @@ if not st.session_state.onboarded:
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96150")
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
         with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
         
         if st.button("Start Exploring"):
             if z_code:
-                # FIXED: f-string syntax error resolved here
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # Role-Based Initial Setup
                 if u_role == "Student":
-                    st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
-                elif u_role == "Parent":
-                    st.session_state.suggestions = ["How do I foster biophilia?", f"Observation tips for my {u_age}yo", "The 'Environment as Teacher' philosophy."]
-                elif u_role == "Teacher":
-                    st.session_state.suggestions = ["Classroom integration ideas", "Documenting student discoveries", "Nature & Literacy pedagogy"]
+                    st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I found a cool animal!", "How do I become a nature explorer?"]
                 else:
-                    st.session_state.suggestions = ["Curriculum philosophy", f"Nature in {city_lookup}"]
+                    st.session_state.suggestions = ["How do I foster biophilia?", "Tips for observing local nature", "Explain the 'Environment as Teacher' philosophy"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -93,17 +81,17 @@ if not st.session_state.onboarded:
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
 SYSTEM_BEHAVIOR = f"""
-You are a peer-mentor for the Saving Planet Earth curriculum. 
-LOCATION: {p['city']}. 
+You are a mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
 USER ROLE: {p['role']}. 
 
 STRICT RULES:
-1. NO QUESTIONS AT THE END: Do not end your response with any question. End with a supportive observation or pedagogical fact.
-2. ADAPTIVE CONTENT: 
-   - Parents/Teachers: Focus heavily on PEDAGOGY (biophilia, scaffolding, documentation).
-   - Students: Bridge hobbies (baseball, boogie boarding) to nature science.
-3. SMART SAFETY: No safety boxes unless an outdoor activity is proposed.
-4. FORMATTING: Underline 1-2 'Power Words' using <u>word</u> tags.
+1. ASK BEFORE ADVISING: Before providing specific activity ideas or curriculum help, you must ask the user about their specific situation (e.g., child's hobbies, classroom setup, or backyard type).
+2. BE CONCISE: Max 2-3 focused sentences.
+3. NO END QUESTIONS: End with a statement. Place your inquisitive question in the middle of your response.
+4. ADAPTIVE CONTENT: 
+   - Parents/Teachers: Focus on <u>biophilia</u> and <u>scaffolding</u>.
+   - Students: Focus on local discovery.
+5. UNDERLINE: Wrap 1-2 'Power Words' in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -131,7 +119,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! How can I help you today?"
+    intro = f"Ready to explore {p['city']}! To help me get started, what are some things your child loves to do or play with?" if p['role'] != 'Student' else f"Hi! I'm ready to explore {p['city']} with you. What do you like to do most when you're outside?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -143,19 +131,17 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
-        # Regex to strip trailing questions
+        # Remove trailing question
         res = re.sub(r'\?\s*$', '.', res.strip())
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # Extraction logic for Vocabulary Sync
         underlined = re.findall(r'<u>(.*?)</u>', res)
-        
         try:
             suggest_prompt = f"""
-            Based on the last response, generate 3 follow-up prompts for a {p['role']}.
-            STRICT RULE: Write these from the USER'S perspective.
-            Include definitions ONLY for these specific words: {underlined}.
+            Generate 3 SHORT prompts for a {p['role']}.
+            STRICT RULE: Write these from the USER'S perspective (e.g., "How do I..." or "Tell me more about...").
+            Include definitions ONLY for: {underlined}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
