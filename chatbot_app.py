@@ -48,7 +48,7 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 4. ONBOARDING (RESTORED PREAMBLE) ---
+# --- 4. ONBOARDING ---
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
@@ -57,7 +57,7 @@ if not st.session_state.onboarded:
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96815")
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
         with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
         
         if st.button("Start Exploring"):
@@ -79,16 +79,19 @@ if not st.session_state.onboarded:
 p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
-You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. TARGET STUDENT AGE: {p['age']}.
+You are an expert nature mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. AGE: {p['age']}.
 
-STRICT CONTENT RULES:
-1. ADULT AUTHORITY (PARENTS/TEACHERS): You are speaking to a peer educator. NEVER tell them to "bring a parent" or "bring an adult." 
-2. INQUIRY FIRST: Do not suggest specific locations or parks until you know what the child/student is curious about (e.g., specific animals, textures, water, insects). 
-3. PEDAGOGY: Focus on the "why" and "how" of the curriculum. Use terms like <u>observation</u>, <u>documentation</u>, or <u>scaffolding</u>.
-4. NO THERAPY: Answer the user's prompt directly. If you don't know the child's interest, ask ONE targeted question about the child's curiosities to build context. 
-5. PUNCTUATION: Every message must end with a (.). Internal questions get a (?).
-6. CONCISE: 3-4 sentences maximum.
+STRICT STUDENT SAFETY RULES:
+1. NO TOUCHING: If a Student suggests touching a wild animal, you must tell them NEVER to touch wildlife and to observe from a distance.
+2. ADULT REQUIRED: If a Student says they are "going" somewhere or asks to find an animal, you MUST tell them they need a parent or adult with them.
+3. GEOGRAPHY: Be honest about {p['city']}. If a child asks for a desert animal (like a scorpion) in a residential city area, tell them it's unlikely to be there and suggest a local animal instead (like a lizard or bird).
+
+GENERAL RULES:
+4. ADULT AUTHORITY: If the user is a Parent/Teacher, NEVER tell them to "bring a parent."
+5. NO THERAPY: Answer the question. Only ask ONE question about the child's interests to help recommend a <u>subject of inquiry</u>.
+6. PUNCTUATION: Every response must end with a (.). Internal questions get a (?).
+7. CONCISE: 3 sentences maximum.
 """
 
 # --- 6. SIDEBAR ---
@@ -119,7 +122,7 @@ if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
-        intro = f"Welcome. I'm here to support you in mentoring a {p['age']}-year-old in {p['city']} using the curriculum principles of <u>biophilia</u> and inquiry. To start, what specific natural elements or animals is your student most curious about right now?"
+        intro = f"Welcome. I'm here to support you in mentoring a {p['age']}-year-old in {p['city']} through the curriculum principles of <u>biophilia</u> and inquiry."
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -131,7 +134,7 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
-        # Ensure punctuation is correct
+        # Clean up punctuation: ensure final period while protecting internal questions
         if not res.endswith('.'):
              res = re.sub(r'[\?\!\.]$', '', res) + "."
         st.markdown(res, unsafe_allow_html=True)
@@ -141,9 +144,6 @@ if query:
         try:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
-            - User asks AI. No therapy pestering.
-            - Definitions for: {underlined}.
-            - Avoid defining common words like 'nature' for {p['role']}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
