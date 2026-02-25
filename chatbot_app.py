@@ -108,12 +108,10 @@ retriever, llm_model = get_bot_chain(api_key)
 if not st.session_state.onboarded:
     st.markdown("<h1 class='main-header'>Saving Planet Earth: Eco-Education Assistant</h1>", unsafe_allow_html=True)
     st.markdown("<h3 class='sub-header'>Based on the work of Ann Lewin-Benham</h3>", unsafe_allow_html=True)
-    
     st.markdown("<div class='welcome-text'>To help us understand the nature right outside your door and tailor the conversation to your needs, please share your location and role below.</div>", unsafe_allow_html=True)
     
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
-        
         c1, c2 = st.columns(2)
         with c1:
             z_code = st.text_input("Zip Code", placeholder="e.g. 91231")
@@ -145,13 +143,14 @@ STRICT RULES:
 1. BREVITY: Max 2 short paragraphs.
 2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
 3. ADAPTIVE LANGUAGE: 
-   - Age < 10: Simple metaphors. 
-   - Age 10-15: Scientific but clear. 
-   - Adult: Professional/Pedagogical based on Ann Lewin-Benham's curriculum.
-4. POWER WORDS: Only extract 'stretch' words relative to age {p['age']}. No common words.
+   - Role Parent/Teacher/Adult: Use professional, pedagogical language. Do NOT explain simple words.
+   - Student < 10: Simple metaphors. 
+   - Student 10-15: Scientific but clear. 
+4. POWER WORDS: 
+   - For ADULTS (Parent/Teacher): ONLY include specific curriculum terms like 'Meaning-FULL', 'Biophilia', or 'Documentation'. Do NOT define standard English words like 'foster', 'dialogue', 'encourage'.
 """
 
-# --- 8. SIDEBAR (SUGGESTIONS + POWER WORDS) ---
+# --- 8. SIDEBAR ---
 with st.sidebar:
     st.title("Suggested Prompts")
     for s in st.session_state.suggestions:
@@ -163,7 +162,7 @@ with st.sidebar:
         st.divider()
         st.subheader("📚 Power Words")
         for word, defn in st.session_state.power_words.items():
-            st.markdown(f"**{word.capitalize()}**: {defn}")
+            st.markdown(f"**{word}**: {defn}")
     
     st.divider()
     if st.button("🔄 Reset Profile"):
@@ -212,7 +211,9 @@ if query:
             update_p = f"""
             Analyze: '{full_res}'. Role: {p['role']}, Age: {p['age']}.
             1. Suggest 3 short user questions for role: {p['role']}.
-            2. Select 1-2 'Power Words' that are a challenge for a {p['age']} year old.
+            2. Select 1-2 'Power Words'. 
+            CRITICAL FOR ADULTS: ONLY extract terms specific to Ann Lewin-Benham's pedagogy (e.g., 'Meaning-FULL', 'Emergent'). 
+            Do NOT extract common words like 'foster', 'dialogue', 'active'.
             Return JSON: {{"prompts": [], "vocab": {{"word": "definition"}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
