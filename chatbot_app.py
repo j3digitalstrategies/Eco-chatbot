@@ -27,12 +27,11 @@ st.markdown("""
     .safety-note { 
         background-color: #fff3e0; 
         color: #432818; 
-        padding: 15px; 
-        border-radius: 10px; 
+        padding: 12px; 
+        border-radius: 8px; 
         border-left: 5px solid #e65100; 
-        margin: 15px 0; 
-        line-height: 1.5;
-        font-weight: bold;
+        margin: 10px 0; 
+        font-size: 0.9em;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -62,7 +61,6 @@ retriever, llm_model = get_bot_chain(api_key)
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
-    
     st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
     
     with st.container():
@@ -70,22 +68,13 @@ if not st.session_state.onboarded:
         c1, c2 = st.columns(2)
         with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96814")
         with c2:
-            if u_role == "Student": u_age = st.number_input("Your Age", 3, 18, 10); c_age = None
-            elif u_role == "Parent": u_age = 35; c_age = st.number_input("Child's Age", 1, 18, 5)
-            elif u_role == "Teacher": u_age = 35; c_age = st.number_input("Student Age Level", 3, 18, 7)
-            else: u_age = 35; c_age = None
+            u_age = st.number_input("Age", 3, 100, 10)
         
         if st.button("Start Exploring"):
             if z_code:
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
-                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age, "child_age": c_age})
-                
-                defaults = {
-                    "Student": [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"],
-                    "Parent": [f"Nature activities in {city_lookup}", "How to help my child observe?", "Safety tips."],
-                    "Teacher": [f"Curriculum for {city_lookup}", "Classroom exploration ideas."],
-                }
-                st.session_state.suggestions = defaults.get(u_role, ["Tell me about the curriculum."])
+                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
+                st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
                 st.session_state.onboarded = True
                 st.rerun()
             else: st.warning("Zip Code required!")
@@ -93,20 +82,17 @@ if not st.session_state.onboarded:
 
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
-is_student = p['role'] == "Student"
-target_age = p['age'] if is_student else p['child_age']
-
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor for the Saving Planet Earth curriculum. 
-LOCATION: {p['city']}. AUDIENCE: {target_age} year old level.
+You are a mentor for the Saving Planet Earth curriculum. 
+LOCATION: {p['city']}. AUDIENCE: {p['age']} year old.
 
-STRICT CONVERSATION STYLE:
-1. NO BOT-LIKE INTERROGATION: Do NOT end every message with a question like "What do you think?" or "What do you want to see?". 
-2. NATURAL FLOW: Share an observation or a cool fact that relates to what the user just said. End with a statement that leaves the door open for them to respond if they want to.
-3. ADULT SUPERVISION: Always remind a child to bring an adult/parent before suggesting they go outside.
-4. SAFETY: Use the safety box for all outdoor hazards:
-   <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions: Stay with an adult, look but don't touch]</div>.
-5. UNDERLINING: Wrap 1-2 'Power Words' (advanced science) in <u>word</u> tags.
+INSTRUCTIONS:
+1. BRIDGE TO INTERESTS: If the user mentions a hobby (baseball, boogie boarding, etc.), connect it back to the curriculum. 
+   - Baseball: Talk about the soil of the diamond, the wind's effect on the ball, or the grass species.
+   - Boogie Boarding: Talk about wave energy, tides, and marine ecosystems in {p['city']}.
+2. SMART SAFETY: Only provide a safety warning IF the user says they are going somewhere or asks for an activity. Do NOT repeat it in general conversation.
+3. CONVERSATION: Never end with a generic "What do you think?". Use a statement that invites a natural reply.
+4. FORMATTING: Wrap 1-2 'Power Words' (advanced science terms) in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
@@ -150,9 +136,8 @@ if query:
         st.session_state.messages.append({"role": "assistant", "content": res})
         
         try:
-            # Instruction to generate USER-SIDE questions, not AI-side questions
             u_res = llm_model.invoke([
-                ("system", f"Suggest 3 SHORT prompts that a {target_age} year old would WANT to ask next. These must be from the USER'S perspective. Define 1-2 underlined advanced terms from the chat. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
+                ("system", f"Suggest 3 SHORT prompts a {p['age']} year old would ask next. Use their interests (e.g. sports) to bridge to nature. Define 1-2 underlined advanced terms. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
                 ("human", res)
             ])
             data = json.loads(u_res.content)
