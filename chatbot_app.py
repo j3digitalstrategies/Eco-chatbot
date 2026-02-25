@@ -24,7 +24,16 @@ st.markdown("""
     .stButton button { display: block; margin: 0 auto; padding: 8px 30px; border-radius: 15px; background-color: #2e7d32; color: white; border: none; }
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
-    .safety-note { background-color: #fff3e0; padding: 15px; border-radius: 10px; border-left: 5px solid #ff9800; margin: 10px 0; font-weight: 500; }
+    /* FIXED SAFETY NOTE STYLING */
+    .safety-note { 
+        background-color: #fff3e0; 
+        color: #432818; 
+        padding: 15px; 
+        border-radius: 10px; 
+        border-left: 5px solid #e65100; 
+        margin: 15px 0; 
+        line-height: 1.5;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -41,7 +50,7 @@ def get_bot_chain(_api_key):
 # --- 3. SESSION STATE ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
-if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "role": "Other", "age": 35, "child_age": None}
+if "profile" not in st.session_state: st.session_state.profile = {"zip": None, "city": "your area", "role": "Other", "age": 35, "child_age": None}
 if "suggestions" not in st.session_state: st.session_state.suggestions = []
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
@@ -63,11 +72,14 @@ if not st.session_state.onboarded:
         
         if st.button("Start Exploring"):
             if z_code:
-                st.session_state.profile.update({"zip": z_code, "role": u_role, "age": u_age, "child_age": c_age})
+                # Get City name for natural conversation
+                city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
+                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age, "child_age": c_age})
+                
                 defaults = {
-                    "Parent": ["How to start an observation?", "Fostering biophilia?", "Safety in nature?"],
-                    "Teacher": ["Implementing in class?", "Documentation tips?", "Local field study?"],
-                    "Student": [f"What's in my {z_code} backyard?", "Cool nature fact.", "How to stay safe while exploring?"],
+                    "Parent": ["How to start an observation?", "What is biophilia?", "Nature-based safety tips."],
+                    "Teacher": ["Implementing in class?", "Documentation tips?", "Explain curriculum."],
+                    "Student": ["What's in my backyard?", "Tell me a cool nature fact.", "How can I explore safely?"],
                     "Other": ["About the curriculum?", "Eco-Education?"]
                 }
                 st.session_state.suggestions = defaults.get(u_role, defaults["Other"])
@@ -82,16 +94,16 @@ is_student = p['role'] == "Student"
 target_age = p['age'] if is_student else p['child_age']
 
 SYSTEM_BEHAVIOR = f"""
-You are a peer-like Socratic mentor.
-ZIP CODE: {p['zip']}. TARGET AUDIENCE: {target_age} year old.
+You are a peer-like Socratic mentor for the Saving Planet Earth curriculum.
+LOCATION: {p['city']}. TARGET AUDIENCE: {target_age} year old.
 
-STRICT RULES:
-1. SAFETY FIRST: If a response involves animals that bite/sting (scorpions, centipedes, etc.) or dangerous environments (ocean, thick brush), you MUST include a safety note. 
-   - Format: Use <div class='safety-note'><b>⚠️ Safety Note:</b> [Instructions]</div>.
-   - Instructions should focus on "Look but don't touch" and "Always ask an adult."
-2. GEOGRAPHIC REALITY: Use {p['zip']} knowledge. No moose in Hawaii.
-3. NO BUYING: Never suggest buying tools. Focus on the five senses.
-4. ADAPTIVE: Calibrate language for {target_age} years old.
+STRICT CONVERSATION RULES:
+1. NATURAL SPEECH: NEVER mention the "Zip Code" {p['zip']} in your text. Refer to the area as "{p['city']}" or "your neighborhood." 
+2. NO BUYING: Never tell users to buy items. Focus on eyes, ears, and patience.
+3. ADAPTIVE TONE: Speak at a level perfect for {target_age} years old.
+4. SAFETY PROTOCOL: If you discuss hazards (stinging insects, deep water, rough terrain), use:
+   <div class='safety-note'><b>⚠️ Safety First:</b> [Instructions]</div>.
+   Ensure instructions are clear and prioritize adult supervision.
 5. UNDERLINING: Wrap exactly 1-2 'Power Words' in <u>word</u> tags.
 6. NO BOT QUESTIONS: End with a statement.
 """
@@ -121,7 +133,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    intro = f"Ready to explore {p['zip']} as a **{p['role']}**. Remember to always explore with a buddy!"
+    intro = f"Ready to explore {p['city']} as a **{p['role']}**. Let's discover what's waiting in your neighborhood!"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -140,7 +152,7 @@ if query:
             found_underlines = re.findall(r'<u>(.*?)</u>', res)
             target_desc = f"student who is {p['age']} years old" if is_student else f"parent of a {p['child_age']}yr old"
             u_res = llm_model.invoke([
-                ("system", f"Suggest 3 short Socratic questions a {target_desc} would ask next about the ecology and safety in {p['zip']}. Define these underlined words ONLY if they are difficult for age {target_age}: {found_underlines}. Discard easy words. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
+                ("system", f"Suggest 3 natural Socratic prompts a {target_desc} would ask next about {p['city']}. NEVER mention a Zip Code. Define these underlined words ONLY if they are difficult for age {target_age}: {found_underlines}. Discard easy words. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
                 ("human", res)
             ])
             data = json.loads(u_res.content)
