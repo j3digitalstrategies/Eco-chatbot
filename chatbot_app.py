@@ -1,13 +1,10 @@
 import streamlit as st
-import os, glob, json, re
-from datetime import datetime
+import os, json, re
 from dotenv import load_dotenv
 
 # Core LangChain & AI
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnablePassthrough
@@ -15,7 +12,6 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- 1. CONFIG & STYLING ---
 load_dotenv()
-DOCS_DIR = "curriculum_docs"
 VECTOR_DB_DIR = "vector_db"
 st.set_page_config(page_title="Saving Planet Earth", layout="wide", page_icon="🌱")
 
@@ -25,13 +21,7 @@ st.markdown("""
     u { text-decoration: underline; color: #2e7d32; font-weight: bold; }
     .sidebar-label { font-weight: bold; color: #2e7d32; margin-top: 10px; margin-bottom: 5px; display: block; }
     .safety-note { 
-        background-color: #fff3e0; 
-        color: #432818; 
-        padding: 12px; 
-        border-radius: 8px; 
-        border-left: 5px solid #e65100; 
-        margin: 10px 0; 
-        font-size: 0.9em;
+        background-color: #fff3e0; color: #432818; padding: 12px; border-radius: 8px; border-left: 5px solid #e65100; margin: 10px 0; font-size: 0.9em;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -40,11 +30,8 @@ st.markdown("""
 @st.cache_resource
 def get_bot_chain(_api_key):
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=_api_key)
-    if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
-        vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
-    else:
-        vectorstore = Chroma(embedding_function=embeddings, persist_directory=VECTOR_DB_DIR)
-    return vectorstore.as_retriever(search_kwargs={"k": 5}), ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=_api_key)
+    vectorstore = Chroma(persist_directory=VECTOR_DB_DIR, embedding_function=embeddings)
+    return vectorstore.as_retriever(search_kwargs={"k": 5}), ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=_api_key)
 
 # --- 3. SESSION STATE ---
 if "messages" not in st.session_state: st.session_state.messages = []
@@ -59,80 +46,50 @@ retriever, llm_model = get_bot_chain(api_key)
 
 # --- 4. ONBOARDING ---
 if not st.session_state.onboarded:
-    st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
-    
+    st.markdown("<h1 style='text-align:center;'>Saving Planet Earth</h1>", unsafe_allow_html=True)
     with st.container():
-        u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
-        c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96150")
-        with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
-        
-        if st.button("Start Exploring"):
-            if z_code:
-                city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
-                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
-                
-                if u_role == "Student":
-                    st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
-                elif u_role == "Parent":
-                    st.session_state.suggestions = ["How do I foster biophilia?", f"Observation tips for my {u_age}yo", "Explain the 'Environment as Teacher' philosophy."]
-                elif u_role == "Teacher":
-                    st.session_state.suggestions = ["Classroom integration ideas", "Pedagogical documentation", "Nature & literacy connection"]
-                else:
-                    st.session_state.suggestions = ["Curriculum overview", f"Local nature in {city_lookup}"]
-                
-                st.session_state.onboarded = True
-                st.rerun()
-            else: st.warning("Zip Code required!")
+        u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"])
+        z_code = st.text_input("Zip Code")
+        u_age = st.number_input("Age level", 3, 100, 10)
+        if st.button("Start"):
+            city = llm_model.invoke(f"Zip {z_code} city/state?").content
+            st.session_state.profile.update({"zip": z_code, "city": city, "role": u_role, "age": u_age})
+            st.session_state.suggestions = [f"What's in {city}?", "Curriculum help"] if u_role != "Student" else ["Backyard animals"]
+            st.session_state.onboarded = True
+            st.rerun()
     st.stop()
 
 # --- 5. BEHAVIOR ---
 p = st.session_state.profile
-is_adult = p['role'] in ["Parent", "Teacher", "Other"]
-
 SYSTEM_BEHAVIOR = f"""
-You are a peer-mentor for the Saving Planet Earth curriculum. 
-LOCATION: {p['city']}. 
-USER ROLE: {p['role']}. 
-
-CRITICAL CONVERSATION RULES:
-1. END WITH A STATEMENT: Never, under any circumstances, end your response with a question (e.g., "What do you think?" or "Have you noticed...?"). End with a clear, supportive observation or a fact.
-2. ADAPTIVE CONTENT: 
-   - Parents/Teachers: Discuss the PEDAGOGY of Ann Lewin-Benham (biophilia, scaffolding, documentation).
-   - Students: Use their hobbies (baseball, boogie boarding) to bridge to nature.
-3. SMART SAFETY: No safety warnings unless an outdoor activity is being discussed.
-4. FORMATTING: Wrap 1-2 'Power Words' (advanced science terms) in <u>word</u> tags.
+You are a peer-mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+STRICT RULES:
+1. NEVER end with a question. No "What do you think?" or "How can I help?". End with a strong statement.
+2. If role is Parent/Teacher: Focus heavily on pedagogy (<u>biophilia</u>, <u>scaffolding</u>, documentation).
+3. If role is Student: Connect their hobbies to nature physics/biology.
+4. Underline 1-2 'Power Words' using <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
     st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
     for idx, s in enumerate(st.session_state.suggestions):
-        if st.button(s, key=f"sug_{idx}_{hash(s)}", use_container_width=True): 
+        if st.button(s, key=f"s_{idx}"): 
             st.session_state.user_query = s
             st.rerun()
-            
     if st.session_state.power_words:
         st.divider()
         st.markdown("<span class='sidebar-label'>📚 Power Words</span>", unsafe_allow_html=True)
-        for word, defn in st.session_state.power_words.items(): 
-            st.markdown(f"**{word}**: {defn}")
-            
-    st.divider()
-    if st.button("🔄 Reset Profile"):
+        for w, d in st.session_state.power_words.items(): st.markdown(f"**{w}**: {d}")
+    if st.button("🔄 Reset"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
 # --- 7. CHAT ENGINE ---
-prompt_template = ChatPromptTemplate.from_messages([("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), MessagesPlaceholder(variable_name="chat_history"), ("human", "{input}")])
-rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)), "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]} | prompt_template | llm_model | StrOutputParser())
+prompt_template = ChatPromptTemplate.from_messages([("system", SYSTEM_BEHAVIOR + "\nContext: {context}"), MessagesPlaceholder(variable_name="chat_history"), ("human", "{input}")])
+rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n".join(d.page_content for d in docs)), "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]} | prompt_template | llm_model | StrOutputParser())
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
-if not st.session_state.messages:
-    intro = f"Ready to explore {p['city']}! How can I help you today?"
-    st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
 if query:
@@ -143,25 +100,21 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist})
+        # Clean trailing questions just in case
+        res = re.sub(r'\?$', '.', res.strip())
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # --- FIXED DYNAMIC SUGGESTIONS ---
+        # EXTRACT UNDERLINED WORDS
+        found_words = re.findall(r'<u>(.*?)</u>', res)
+        
         try:
-            suggest_prompt = f"""
-            Generate 3 NEW follow-up questions for the USER to click. 
-            USER ROLE: {p['role']}.
-            STRICT RULE: These must be written from the USER'S perspective (e.g., "How do I..." or "Tell me more about..."). 
-            DO NOT generate questions that the AI wants to ask the user.
-            
-            - If Student: Ask about local animals, their hobbies, or nature secrets.
-            - If Parent/Teacher: Ask about pedagogical tools, documentation, or scaffolding.
-            - Provide 1-2 definitions for Power Words.
-            Return JSON: {{"prompts": ["User question 1", "User question 2", "User question 3"], "vocab": {{"word": "definition"}}}}
-            """
-            u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
+            u_res = llm_model.invoke([
+                ("system", f"Suggest 3 SHORT prompts for a {p['role']} to ask NEXT. Write from USER'S perspective. Provide definitions ONLY for these specific words: {found_words}. Return JSON: {{'prompts': [], 'vocab': {{}}}}")
+            ])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
-            st.session_state.power_words = data.get("vocab", {})
+            # Filter vocab to ensure only words actually in the text appear
+            st.session_state.power_words = {k: v for k, v in data.get("vocab", {}).items() if k.lower() in [w.lower() for w in found_words]}
         except: pass
     st.rerun()
