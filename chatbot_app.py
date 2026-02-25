@@ -33,13 +33,14 @@ st.markdown("""
     }
     .welcome-text {
         text-align: center;
-        font-size: 1.15em;
+        font-size: 1.2em;
         color: #1b5e20;
-        margin-bottom: 25px;
-        line-height: 1.5;
-        max-width: 800px;
+        margin-bottom: 30px;
+        line-height: 1.6;
+        max-width: 900px;
         margin-left: auto;
         margin-right: auto;
+        display: block;
     }
     .main-header {
         text-align: center;
@@ -52,15 +53,9 @@ st.markdown("""
         font-style: italic;
         margin-bottom: 30px;
     }
-    /* Centering the selectbox and inputs */
-    [data-testid="stVerticalBlock"] > div:has(div.stSelectbox) {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    .centered-container {
-        display: flex;
-        justify-content: center;
+    /* Ensure all markdown containers in the main area center their text if they are welcome-text */
+    div[data-testid="stMarkdownContainer"] > p.welcome-text {
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -104,21 +99,16 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 5. PURPOSE-DRIVEN ONBOARDING ---
+# --- 5. UNIFIED ONBOARDING ---
 if not st.session_state.onboarded:
     st.markdown("<h1 class='main-header'>Saving Planet Earth: Eco-Education Assistant</h1>", unsafe_allow_html=True)
     st.markdown("<h3 class='sub-header'>Based on the work of Ann Lewin-Benham</h3>", unsafe_allow_html=True)
     
-    st.markdown("""
-        <p class='welcome-text'>
-        To help us understand the nature right outside your door and tailor 
-        the conversation to your needs, please share your location and role below.
-        </p>
-        """, unsafe_allow_html=True)
+    # The centered "Us" preamble
+    st.markdown("<div class='welcome-text'>To help us understand the nature right outside your door and tailor the conversation to your needs, please share your location and role below.</div>", unsafe_allow_html=True)
     
-    # Selection logic for layout
-    _, mid, _ = st.columns([1, 2, 1])
-    with mid:
+    with st.container():
+        # Single row layout restored for better looks
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         
         c1, c2 = st.columns(2)
@@ -126,10 +116,10 @@ if not st.session_state.onboarded:
             z_code = st.text_input("Zip Code", placeholder="e.g. 91231")
         with c2:
             if u_role == "Student":
-                u_age = st.number_input("How old are you?", min_value=3, max_value=100, value=10)
+                u_age = st.number_input("Age", min_value=3, max_value=100, value=10)
             else:
-                u_age = 35 # Hidden default
-                st.write("") # Alignment spacer
+                u_age = 35 # Hidden default for adults
+                st.write("") # Spacer
         
         st.write("") 
         if st.button("Start Exploring"):
@@ -149,7 +139,7 @@ CONTEXT: Role={p['role']}, Age={p['age']}, ZIP={p['zip']}.
 
 STRICT RULES:
 1. BREVITY: Max 2 short paragraphs.
-2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate.
+2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
 3. ADAPTIVE LANGUAGE: 
    - Age < 10: Simple metaphors. 
    - Age 10-15: Clear scientific terms. 
@@ -171,6 +161,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 8. CHAT ENGINE ---
+# (RAG and LLM logic remains unchanged)
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"),
     MessagesPlaceholder(variable_name="chat_history"),
@@ -209,7 +200,10 @@ if query:
         try:
             update_p = f"""
             Analyze: '{full_res}'. Role: {p['role']}, Age: {p['age']}.
-            Select 1-2 'Power Words' that are a challenge/stretch for a {p['age']} year old.
+            Select 1-2 'Power Words'. 
+            CRITICAL: 
+            - If Adult, extract pedagogical/curriculum theory terms.
+            - If Student, extract 'stretch' scientific terms for age {p['age']}.
             Return JSON: {{"vocab": {{"word": "definition"}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
