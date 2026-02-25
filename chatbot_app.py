@@ -74,15 +74,14 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # INITIAL ROLE-BASED SUGGESTIONS
                 if u_role == "Student":
                     st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
                 elif u_role == "Parent":
-                    st.session_state.suggestions = ["How do I foster biophilia?", f"Nature activities for my {u_age}yo", "The 'Environment as the Teacher' philosophy."]
+                    st.session_state.suggestions = ["How do I foster biophilia?", f"Observation tips for my {u_age}yo", "Explain the 'Environment as Teacher' philosophy."]
                 elif u_role == "Teacher":
-                    st.session_state.suggestions = ["Integrating this in my classroom", "Documentation techniques", "Connecting nature to literacy"]
+                    st.session_state.suggestions = ["Classroom integration ideas", "Pedagogical documentation", "Nature & literacy connection"]
                 else:
-                    st.session_state.suggestions = ["Curriculum philosophy", f"Nature safety in {city_lookup}"]
+                    st.session_state.suggestions = ["Curriculum overview", f"Local nature in {city_lookup}"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -94,26 +93,24 @@ p = st.session_state.profile
 is_adult = p['role'] in ["Parent", "Teacher", "Other"]
 
 SYSTEM_BEHAVIOR = f"""
-You are a mentor for the Saving Planet Earth curriculum. 
+You are a peer-mentor for the Saving Planet Earth curriculum. 
 LOCATION: {p['city']}. 
 USER ROLE: {p['role']}. 
-TARGET AGE LEVEL: {p['age']}.
 
-CORE RULES:
-1. ADAPTIVE CONTENT: 
-   - For Parents/Teachers: Focus on PEDAGOGY (biophilia, documentation, Socratic method).
-   - For Students: Focus on CURIOSITY and bridging hobbies (baseball, etc.) to nature science.
-2. SMART SAFETY: No safety boxes unless the user is planning to go outside.
-3. CONVERSATION: Never end with "What do you think?". End with a natural observation.
-4. FORMATTING: Wrap 1-2 'Power Words' in <u>word</u> tags.
+CRITICAL CONVERSATION RULES:
+1. END WITH A STATEMENT: Never, under any circumstances, end your response with a question (e.g., "What do you think?" or "Have you noticed...?"). End with a clear, supportive observation or a fact.
+2. ADAPTIVE CONTENT: 
+   - Parents/Teachers: Discuss the PEDAGOGY of Ann Lewin-Benham (biophilia, scaffolding, documentation).
+   - Students: Use their hobbies (baseball, boogie boarding) to bridge to nature.
+3. SMART SAFETY: No safety warnings unless an outdoor activity is being discussed.
+4. FORMATTING: Wrap 1-2 'Power Words' (advanced science terms) in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
     st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
-    # Clear and clean logic for rendering suggestions
     for idx, s in enumerate(st.session_state.suggestions):
-        if st.button(s, key=f"suggest_{idx}_{hash(s)}", use_container_width=True): 
+        if st.button(s, key=f"sug_{idx}_{hash(s)}", use_container_width=True): 
             st.session_state.user_query = s
             st.rerun()
             
@@ -149,15 +146,18 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
-        # --- DYNAMIC SUGGESTION GENERATION ---
+        # --- FIXED DYNAMIC SUGGESTIONS ---
         try:
             suggest_prompt = f"""
-            Based on the message above, suggest 3 NEW, highly relevant follow-up questions for a {p['role']}.
-            - If student: focus on their interest/hobbies or specific nature discovery.
-            - If parent/teacher: focus on pedagogical strategies (biophilia, documentation, how to guide the child).
-            - DO NOT repeat old suggestions.
-            - Provide 1-2 definitions for underlined Power Words.
-            Return ONLY a JSON object: {{"prompts": ["...", "..."], "vocab": {{"word": "definition"}}}}
+            Generate 3 NEW follow-up questions for the USER to click. 
+            USER ROLE: {p['role']}.
+            STRICT RULE: These must be written from the USER'S perspective (e.g., "How do I..." or "Tell me more about..."). 
+            DO NOT generate questions that the AI wants to ask the user.
+            
+            - If Student: Ask about local animals, their hobbies, or nature secrets.
+            - If Parent/Teacher: Ask about pedagogical tools, documentation, or scaffolding.
+            - Provide 1-2 definitions for Power Words.
+            Return JSON: {{"prompts": ["User question 1", "User question 2", "User question 3"], "vocab": {{"word": "definition"}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
