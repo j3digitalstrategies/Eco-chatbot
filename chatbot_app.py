@@ -53,6 +53,11 @@ st.markdown("""
         font-style: italic;
         margin-bottom: 30px;
     }
+    u {
+        text-decoration: underline;
+        color: #2e7d32;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -143,11 +148,12 @@ STRICT RULES:
 1. BREVITY: Max 2 short paragraphs.
 2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
 3. ADAPTIVE LANGUAGE: 
-   - Role Parent/Teacher/Adult: Use professional, pedagogical language. Do NOT explain simple words.
-   - Student < 10: Simple metaphors. 
-   - Student 10-15: Scientific but clear. 
-4. POWER WORDS: 
-   - For ADULTS (Parent/Teacher): ONLY include specific curriculum terms like 'Meaning-FULL', 'Biophilia', or 'Documentation'. Do NOT define standard English words like 'foster', 'dialogue', 'encourage'.
+   - Adults (Parent/Teacher): Professional and pedagogical. Do NOT define common words.
+   - Students: Age-appropriate metaphors or scientific terms.
+4. UNDERLINING & POWER WORDS: 
+   - You MUST wrap 1-2 key pedagogical or scientific terms per response in <u>word</u> tags.
+   - ONLY underline words you are currently explaining or using in the text.
+   - For adults, ONLY underline curriculum-specific terms (e.g., <u>Meaning-FULL</u>).
 """
 
 # --- 8. SIDEBAR ---
@@ -161,6 +167,7 @@ with st.sidebar:
     if st.session_state.power_words:
         st.divider()
         st.subheader("📚 Power Words")
+        # Sort words so they appear alphabetically or by most recent
         for word, defn in st.session_state.power_words.items():
             st.markdown(f"**{word}**: {defn}")
     
@@ -184,7 +191,7 @@ rag_chain = (
 
 # --- 10. DISPLAY ---
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
+    with st.chat_message(m["role"]): st.markdown(m["content"], unsafe_allow_html=True)
 
 if not st.session_state.messages:
     intro = f"Ready to explore as a **{p['role']}**. What's your focus today?"
@@ -204,21 +211,28 @@ if query:
 
     with st.chat_message("assistant"):
         full_res = rag_chain.invoke({"input": query, "chat_history": history})
-        st.markdown(full_res)
+        st.markdown(full_res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": full_res})
+        
+        # 1. FIND UNDERLINED WORDS IN THE ACTUAL TEXT
+        found_underlines = re.findall(r'<u>(.*?)</u>', full_res)
         
         try:
             update_p = f"""
-            Analyze: '{full_res}'. Role: {p['role']}, Age: {p['age']}.
-            1. Suggest 3 short user questions for role: {p['role']}.
-            2. Select 1-2 'Power Words'. 
-            CRITICAL FOR ADULTS: ONLY extract terms specific to Ann Lewin-Benham's pedagogy (e.g., 'Meaning-FULL', 'Emergent'). 
-            Do NOT extract common words like 'foster', 'dialogue', 'active'.
-            Return JSON: {{"prompts": [], "vocab": {{"word": "definition"}}}}
+            Task:
+            1. Suggest 3 short user follow-up questions for a {p['role']}.
+            2. Provide curriculum-specific definitions ONLY for these words found in the text: {found_underlines}.
+            
+            Return ONLY JSON: {{"prompts": [], "vocab": {{"word": "definition"}}}}
             """
-            u_res = llm_model.invoke([("system", update_p), ("human", query)])
+            u_res = llm_model.invoke([("system", update_p), ("human", full_res)])
             data = json.loads(u_res.content)
+            
+            # 2. STRICT FILTER: Only add word to session state if it was in 'found_underlines'
+            # This prevents "hidden" words or words from suggested prompts from entering the list.
+            valid_vocab = {k: v for k, v in data.get("vocab", {}).items() if k in found_underlines}
+            
             st.session_state.suggestions = data.get("prompts", [])
-            st.session_state.power_words.update(data.get("vocab", {}))
+            st.session_state.power_words.update(valid_vocab)
         except: pass
     st.rerun()
