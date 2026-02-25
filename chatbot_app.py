@@ -53,10 +53,6 @@ st.markdown("""
         font-style: italic;
         margin-bottom: 30px;
     }
-    /* Ensure all markdown containers in the main area center their text if they are welcome-text */
-    div[data-testid="stMarkdownContainer"] > p.welcome-text {
-        text-align: center;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -87,28 +83,35 @@ def get_bot_chain(_api_key):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, openai_api_key=_api_key)
     return retriever, llm
 
-# --- 3. SESSION STATE ---
+# --- 3. ROLE DEFAULTS ---
+DEFAULT_PROMPTS = {
+    "Parent": ["How do I start an observation?", "What is Meaning-FULL conversation?", "How to foster biophilia?"],
+    "Teacher": ["Classroom implementation?", "Documentation strategies?", "What are the core pillars?"],
+    "Student": ["What can I explore today?", "Tell me a cool nature fact.", "How do I start a nature journal?"],
+    "Other": ["Tell me about the curriculum.", "Who is Ann Lewin-Benham?", "What is Eco-Education?"]
+}
+
+# --- 4. SESSION STATE ---
 if "messages" not in st.session_state: st.session_state.messages = []
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "profile" not in st.session_state: 
     st.session_state.profile = {"zip": None, "role": "Other", "age": 35}
+if "suggestions" not in st.session_state: st.session_state.suggestions = DEFAULT_PROMPTS["Other"]
 if "power_words" not in st.session_state: st.session_state.power_words = {}
 
-# --- 4. API & ENGINE INIT ---
+# --- 5. API & ENGINE INIT ---
 api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 5. UNIFIED ONBOARDING ---
+# --- 6. UNIFIED ONBOARDING ---
 if not st.session_state.onboarded:
     st.markdown("<h1 class='main-header'>Saving Planet Earth: Eco-Education Assistant</h1>", unsafe_allow_html=True)
     st.markdown("<h3 class='sub-header'>Based on the work of Ann Lewin-Benham</h3>", unsafe_allow_html=True)
     
-    # The centered "Us" preamble
     st.markdown("<div class='welcome-text'>To help us understand the nature right outside your door and tailor the conversation to your needs, please share your location and role below.</div>", unsafe_allow_html=True)
     
     with st.container():
-        # Single row layout restored for better looks
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=1)
         
         c1, c2 = st.columns(2)
@@ -118,20 +121,21 @@ if not st.session_state.onboarded:
             if u_role == "Student":
                 u_age = st.number_input("Age", min_value=3, max_value=100, value=10)
             else:
-                u_age = 35 # Hidden default for adults
-                st.write("") # Spacer
+                u_age = 35 
+                st.write("") 
         
         st.write("") 
         if st.button("Start Exploring"):
             if z_code:
                 st.session_state.profile.update({"zip": z_code, "role": u_role, "age": u_age})
+                st.session_state.suggestions = DEFAULT_PROMPTS[u_role]
                 st.session_state.onboarded = True
                 st.rerun()
             else:
                 st.warning("Please enter a Zip Code so we can know your environment!")
     st.stop()
 
-# --- 6. BEHAVIOR ---
+# --- 7. BEHAVIOR ---
 p = st.session_state.profile
 SYSTEM_BEHAVIOR = f"""
 You are a peer-like Socratic mentor for Ann Lewin-Benham's Eco-Education.
@@ -142,15 +146,21 @@ STRICT RULES:
 2. LOCAL TRUTH: Use ZIP {p['zip']} to inform answers about wildlife/climate silently.
 3. ADAPTIVE LANGUAGE: 
    - Age < 10: Simple metaphors. 
-   - Age 10-15: Clear scientific terms. 
+   - Age 10-15: Scientific but clear. 
    - Adult: Professional/Pedagogical based on Ann Lewin-Benham's curriculum.
 4. POWER WORDS: Only extract 'stretch' words relative to age {p['age']}. No common words.
 """
 
-# --- 7. SIDEBAR ---
+# --- 8. SIDEBAR (SUGGESTIONS + POWER WORDS) ---
 with st.sidebar:
-    st.title("🌱 Mentor Sidebar")
+    st.title("Suggested Prompts")
+    for s in st.session_state.suggestions:
+        if st.button(s, use_container_width=True): 
+            st.session_state.user_query = s
+            st.rerun()
+
     if st.session_state.power_words:
+        st.divider()
         st.subheader("📚 Power Words")
         for word, defn in st.session_state.power_words.items():
             st.markdown(f"**{word.capitalize()}**: {defn}")
@@ -160,8 +170,7 @@ with st.sidebar:
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
-# --- 8. CHAT ENGINE ---
-# (RAG and LLM logic remains unchanged)
+# --- 9. CHAT ENGINE ---
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"),
     MessagesPlaceholder(variable_name="chat_history"),
@@ -174,7 +183,7 @@ rag_chain = (
     | prompt_template | llm_model | StrOutputParser()
 )
 
-# --- 9. DISPLAY ---
+# --- 10. DISPLAY ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
@@ -183,10 +192,12 @@ if not st.session_state.messages:
     with st.chat_message("assistant"): st.markdown(intro)
     st.session_state.messages.append({"role": "assistant", "content": intro})
 
-# --- 10. INPUT & DYNAMIC LOGIC ---
-query = st.chat_input("Type here...")
+# --- 11. INPUT & DYNAMIC LOGIC ---
+user_input = st.chat_input("Type here...")
+query = st.session_state.get("user_query") or user_input
 
 if query:
+    if "user_query" in st.session_state: del st.session_state["user_query"]
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"): st.markdown(query)
     
@@ -200,14 +211,13 @@ if query:
         try:
             update_p = f"""
             Analyze: '{full_res}'. Role: {p['role']}, Age: {p['age']}.
-            Select 1-2 'Power Words'. 
-            CRITICAL: 
-            - If Adult, extract pedagogical/curriculum theory terms.
-            - If Student, extract 'stretch' scientific terms for age {p['age']}.
-            Return JSON: {{"vocab": {{"word": "definition"}}}}
+            1. Suggest 3 short user questions for role: {p['role']}.
+            2. Select 1-2 'Power Words' that are a challenge for a {p['age']} year old.
+            Return JSON: {{"prompts": [], "vocab": {{"word": "definition"}}}}
             """
             u_res = llm_model.invoke([("system", update_p), ("human", query)])
             data = json.loads(u_res.content)
+            st.session_state.suggestions = data.get("prompts", [])
             st.session_state.power_words.update(data.get("vocab", {}))
         except: pass
     st.rerun()
