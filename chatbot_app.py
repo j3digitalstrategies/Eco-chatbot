@@ -80,16 +80,16 @@ p = st.session_state.profile
 
 if p['role'] in ['Parent', 'Teacher']:
     ROLE_SPECIFIC_RULES = """
-    1. PEDAGOGY ONLY: You are a mentor teaching an adult how to use the 'Saving Planet Earth' curriculum. 
-    2. NO TOURISM: Do not suggest specific parks, beaches, or commercial locations.
-    3. TEXTBOOK FOCUS: Use principles like <u>documentation</u>, <u>scaffolding</u>, and <u>representation</u>. 
-    4. NO SAFETY LECTURES: Do not tell the adult to 'bring an adult'.
+    1. PEDAGOGY FIRST: You are a mentor teaching the 'Saving Planet Earth' textbook principles. Give concrete pedagogical ideas.
+    2. STOP THE PESTERING: Answer the user's question with substance. Do not keep asking 'What do you think?' or 'How does your child feel?' 
+    3. TEXTBOOK CONCEPTS: Explain how to use <u>documentation</u> (capturing words/photos) and <u>representation</u> (using clay, wire, or drawing) to help the child express their inquiry.
+    4. NO TOURISM: Do not suggest specific parks or local businesses.
     """
 else:
     ROLE_SPECIFIC_RULES = """
     1. SAFETY: If the student suggests going outside, tell them to bring a parent/adult. 
     2. NO TOUCHING: Remind them to observe wildlife from a distance.
-    3. AGE APPROPRIATE: Strictly refuse to discuss drugs, marijuana, mushrooms, or illegal substances. Pivot immediately back to nature (birds, trees, insects).
+    3. AGE APPROPRIATE: Strictly refuse to discuss drugs or illegal substances.
     """
 
 SYSTEM_BEHAVIOR = f"""
@@ -99,9 +99,9 @@ USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
 {ROLE_SPECIFIC_RULES}
 
 GENERAL RULES:
-5. NO THERAPY: Answer directly. Ask ONE question about the child's interest to establish a <u>subject of inquiry</u>.
+5. NO THERAPY: Avoid asking more than ONE targeted question to build context.
 6. PUNCTUATION: Every response MUST end with a period (.) OR a question mark (?).
-7. CONCISE: 3 sentences maximum.
+7. CONCISE: 3-4 sentences maximum.
 """
 
 # --- 6. SIDEBAR ---
@@ -157,7 +157,7 @@ if query:
             suggest_prompt = f"""
             Generate exactly 3 short follow-up questions that the {p['role']} would ask the AI. 
             The questions MUST be from the user's perspective to the AI.
-            STRICT: If the user asked about drugs or inappropriate content, DO NOT generate suggestions for that topic. Pivot to trees/birds.
+            STRICT: Ensure prompts focus on pedagogical methods for Parent/Teacher roles.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
