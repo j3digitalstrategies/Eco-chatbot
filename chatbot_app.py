@@ -8,10 +8,10 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
 
 # --- 1. CONFIG & STYLING ---
 load_dotenv()
@@ -48,7 +48,7 @@ api_key = st.secrets.get("OPENAI_API_KEY")
 if not api_key: st.error("API Key missing."); st.stop()
 retriever, llm_model = get_bot_chain(api_key)
 
-# --- 4. ONBOARDING (RESTORING PREAMBLE) ---
+# --- 4. ONBOARDING (RESTORED PREAMBLE) ---
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
@@ -57,7 +57,7 @@ if not st.session_state.onboarded:
     with st.container():
         u_role = st.selectbox("I am a...", ["Student", "Parent", "Teacher", "Other"], index=0)
         c1, c2 = st.columns(2)
-        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
+        with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 96815")
         with c2: u_age = st.number_input("Age (or target student age)", 3, 100, 10)
         
         if st.button("Start Exploring"):
@@ -68,7 +68,7 @@ if not st.session_state.onboarded:
                 if u_role == "Student":
                     st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
                 else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "Explain the role of biophilia", "How do I use this guide?"]
+                    st.session_state.suggestions = ["What is the core philosophy?", "Explain biophilia", "How do I start an inquiry?"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -79,15 +79,16 @@ if not st.session_state.onboarded:
 p = st.session_state.profile
 
 SYSTEM_BEHAVIOR = f"""
-You are an expert nature mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-ROLE: {p['role']}. TARGET AGE: {p['age']}.
+You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. TARGET STUDENT AGE: {p['age']}.
 
 STRICT CONTENT RULES:
-1. SAFETY: If you suggest a Student go to a park or outside, simply mention they should bring a parent or adult.
-2. NO THERAPY: Focus on curriculum insights. Avoid ending every message with a question.
-3. PUNCTUATION: Every response must end with a period (.). Internal questions must have a (?).
-4. ADULT VOCAB: For Adults, only define specialized terms (e.g., <u>biophilia</u>). Never define common words like "relationship" or "nature".
-5. CONCISE: 3-4 sentences maximum.
+1. ADULT AUTHORITY (PARENTS/TEACHERS): You are speaking to a peer educator. NEVER tell them to "bring a parent" or "bring an adult." 
+2. INQUIRY FIRST: Do not suggest specific locations or parks until you know what the child/student is curious about (e.g., specific animals, textures, water, insects). 
+3. PEDAGOGY: Focus on the "why" and "how" of the curriculum. Use terms like <u>observation</u>, <u>documentation</u>, or <u>scaffolding</u>.
+4. NO THERAPY: Answer the user's prompt directly. If you don't know the child's interest, ask ONE targeted question about the child's curiosities to build context. 
+5. PUNCTUATION: Every message must end with a (.). Internal questions get a (?).
+6. CONCISE: 3-4 sentences maximum.
 """
 
 # --- 6. SIDEBAR ---
@@ -118,7 +119,7 @@ if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
-        intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
+        intro = f"Welcome. I'm here to support you in mentoring a {p['age']}-year-old in {p['city']} using the curriculum principles of <u>biophilia</u> and inquiry. To start, what specific natural elements or animals is your student most curious about right now?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -130,7 +131,7 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
-        # Ensure final period while preserving internal question marks
+        # Ensure punctuation is correct
         if not res.endswith('.'):
              res = re.sub(r'[\?\!\.]$', '', res) + "."
         st.markdown(res, unsafe_allow_html=True)
@@ -140,8 +141,9 @@ if query:
         try:
             suggest_prompt = f"""
             Generate 3 follow-up questions for a {p['role']}.
-            - User asks AI. No answering for the AI.
-            - Focus: "Tell me more about [underlined word]", "How do trees help the air?", "What can I find in {p['city']}?".
+            - User asks AI. No therapy pestering.
+            - Definitions for: {underlined}.
+            - Avoid defining common words like 'nature' for {p['role']}.
             Return JSON: {{"prompts": [], "vocab": {{}}}}
             """
             u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
@@ -149,7 +151,7 @@ if query:
             st.session_state.suggestions = data.get("prompts", [])
             
             new_defs = data.get("vocab", {})
-            blocklist = ["relationship", "nature", "observation", "community", "environment"]
+            blocklist = ["relationship", "nature", "observation", "community", "environment", "parent", "teacher"]
             for word, defn in new_defs.items():
                 w_lower = word.lower()
                 if any(u.lower() == w_lower for u in underlined):
