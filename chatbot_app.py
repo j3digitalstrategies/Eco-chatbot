@@ -74,15 +74,15 @@ if not st.session_state.onboarded:
                 city_lookup = llm_model.invoke(f"What city is Zip Code {z_code}? Return ONLY the city and state name.").content
                 st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
                 
-                # ROLE-BASED INITIAL SUGGESTIONS
+                # INITIAL ROLE-BASED SUGGESTIONS
                 if u_role == "Student":
                     st.session_state.suggestions = [f"What's in my backyard in {city_lookup}?", "I saw a cool animal today!", "How do I become a nature explorer?"]
                 elif u_role == "Parent":
-                    st.session_state.suggestions = ["How do I foster biophilia in my child?", f"Nature observation activities for a {u_age}yo", "How to use the 'Environment as the Teacher'?"]
+                    st.session_state.suggestions = ["How do I foster biophilia?", f"Nature activities for my {u_age}yo", "The 'Environment as the Teacher' philosophy."]
                 elif u_role == "Teacher":
-                    st.session_state.suggestions = ["How to integrate this curriculum in my classroom?", "Documenting student discoveries in nature", "Connecting outdoor exploration to literacy"]
+                    st.session_state.suggestions = ["Integrating this in my classroom", "Documentation techniques", "Connecting nature to literacy"]
                 else:
-                    st.session_state.suggestions = ["Tell me about the curriculum's philosophy", f"Nature safety in {city_lookup}"]
+                    st.session_state.suggestions = ["Curriculum philosophy", f"Nature safety in {city_lookup}"]
                 
                 st.session_state.onboarded = True
                 st.rerun()
@@ -94,33 +94,26 @@ p = st.session_state.profile
 is_adult = p['role'] in ["Parent", "Teacher", "Other"]
 
 SYSTEM_BEHAVIOR = f"""
-You are a mentor for the Saving Planet Earth curriculum by Ann Lewin-Benham. 
+You are a mentor for the Saving Planet Earth curriculum. 
 LOCATION: {p['city']}. 
-TARGET AUDIENCE: {p['role']} (dealing with {p['age']} year old level).
+USER ROLE: {p['role']}. 
+TARGET AGE LEVEL: {p['age']}.
 
-STRICT ROLE RULES:
-1. FOR PARENTS/TEACHERS: Focus on PEDAGOGY. Discuss concepts like:
-   - Biophilia (innate love for nature).
-   - "The Environment as the Third Teacher."
-   - Socratic questioning and scaffolding.
-   - Self-directed exploration and documentation.
-   Speak as an educational consultant/collaborator.
-
-2. FOR STUDENTS: Focus on CURIOSITY. 
-   - Use their hobbies (baseball, boogie boarding) to explain local nature physics/biology.
-   - Speak as a peer-mentor.
-
-GENERAL RULES:
-- SMART SAFETY: Only warn if action is proposed.
-- NO BOT QUESTIONS: End with a statement or natural lead-in.
-- FORMATTING: Wrap 1-2 'Power Words' in <u>word</u> tags.
+CORE RULES:
+1. ADAPTIVE CONTENT: 
+   - For Parents/Teachers: Focus on PEDAGOGY (biophilia, documentation, Socratic method).
+   - For Students: Focus on CURIOSITY and bridging hobbies (baseball, etc.) to nature science.
+2. SMART SAFETY: No safety boxes unless the user is planning to go outside.
+3. CONVERSATION: Never end with "What do you think?". End with a natural observation.
+4. FORMATTING: Wrap 1-2 'Power Words' in <u>word</u> tags.
 """
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
     st.markdown("<span class='sidebar-label'>💡 Suggested Prompts</span>", unsafe_allow_html=True)
+    # Clear and clean logic for rendering suggestions
     for idx, s in enumerate(st.session_state.suggestions):
-        if st.button(s, key=f"btn_{idx}_{s[:10]}", use_container_width=True): 
+        if st.button(s, key=f"suggest_{idx}_{hash(s)}", use_container_width=True): 
             st.session_state.user_query = s
             st.rerun()
             
@@ -141,10 +134,7 @@ rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\
 
 for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
 if not st.session_state.messages:
-    if is_adult:
-        intro = f"Welcome. I'm here to help you implement the Saving Planet Earth curriculum in {p['city']}. How can we support your {p['age']}yo's journey into nature today?"
-    else:
-        intro = f"Ready to explore {p['city']}! Let's discover what's waiting in your neighborhood."
+    intro = f"Ready to explore {p['city']}! How can I help you today?"
     st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
@@ -159,18 +149,17 @@ if query:
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
+        # --- DYNAMIC SUGGESTION GENERATION ---
         try:
-            # ROLE-SPECIFIC PROMPT GENERATION
-            prompt_instr = f"Suggest 3 SHORT prompts that a {p['role']} would ask next. "
-            if is_adult:
-                prompt_instr += "Focus on teaching strategies, child psychology in nature, or curriculum application."
-            else:
-                prompt_instr += "Keep it fun, curious, and related to their neighborhood or hobbies."
-            
-            u_res = llm_model.invoke([
-                ("system", f"{prompt_instr} Define 1-2 underlined terms. Return JSON: {{'prompts': [], 'vocab': {{}}}}"),
-                ("human", res)
-            ])
+            suggest_prompt = f"""
+            Based on the message above, suggest 3 NEW, highly relevant follow-up questions for a {p['role']}.
+            - If student: focus on their interest/hobbies or specific nature discovery.
+            - If parent/teacher: focus on pedagogical strategies (biophilia, documentation, how to guide the child).
+            - DO NOT repeat old suggestions.
+            - Provide 1-2 definitions for underlined Power Words.
+            Return ONLY a JSON object: {{"prompts": ["...", "..."], "vocab": {{"word": "definition"}}}}
+            """
+            u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
             st.session_state.power_words = data.get("vocab", {})
