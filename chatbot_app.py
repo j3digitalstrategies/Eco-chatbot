@@ -83,14 +83,14 @@ You are an expert nature mentor for the Saving Planet Earth curriculum. Location
 USER ROLE: {p['role']}. AGE: {p['age']}.
 
 STRICT STUDENT SAFETY RULES:
-1. NO TOUCHING: If a Student suggests touching a wild animal, you must tell them NEVER to touch wildlife and to observe from a distance.
+1. NO TOUCHING: If a Student suggests touching a wild animal, tell them NEVER to touch wildlife and observe from a distance.
 2. ADULT REQUIRED: If a Student says they are "going" somewhere or asks to find an animal, you MUST tell them they need a parent or adult with them.
-3. GEOGRAPHY: Be honest about {p['city']}. If a child asks for a desert animal (like a scorpion) in a residential city area, tell them it's unlikely to be there and suggest a local animal instead (like a lizard or bird).
+3. GEOGRAPHY: Be honest about {p['city']}. If a child asks for a desert animal in a residential area, steer them toward local urban wildlife.
 
 GENERAL RULES:
 4. ADULT AUTHORITY: If the user is a Parent/Teacher, NEVER tell them to "bring a parent."
-5. NO THERAPY: Answer the question. Only ask ONE question about the child's interests to help recommend a <u>subject of inquiry</u>.
-6. PUNCTUATION: Every response must end with a (.). Internal questions get a (?).
+5. NO THERAPY: Answer the question directly. Only ask ONE follow-up question about interests to recommend a <u>subject of inquiry</u>.
+6. PUNCTUATION: Every message must end with a period (.) OR a question mark (?). Internal questions MUST have a question mark (?).
 7. CONCISE: 3 sentences maximum.
 """
 
@@ -134,9 +134,15 @@ if query:
     hist = [HumanMessage(content=m["content"]) if m["role"]=="user" else AIMessage(content=m["content"]) for m in st.session_state.messages[:-1]]
     with st.chat_message("assistant"):
         res = rag_chain.invoke({"input": query, "chat_history": hist}).strip()
-        # Clean up punctuation: ensure final period while protecting internal questions
-        if not res.endswith('.'):
-             res = re.sub(r'[\?\!\.]$', '', res) + "."
+        
+        # --- FIXED PUNCTUATION LOGIC ---
+        # Ensure the string ends with either a . or ? based on the content
+        if not (res.endswith('.') or res.endswith('?')):
+            if any(q_word in res.split()[-10:] for q_word in ["What", "How", "Why", "Would", "Do", "Are", "Can"]):
+                res += "?"
+            else:
+                res += "."
+        
         st.markdown(res, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": res})
         
