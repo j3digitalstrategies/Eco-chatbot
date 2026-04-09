@@ -90,13 +90,13 @@ if p['role'] == 'Parent/Teacher':
     5. SUBSTANCE: Provide concrete ways to use <u>scaffolding</u> and <u>representation</u> to deepen the child's inquiry.
     """
 else:
-    # FIXED: Using .format() here to prevent LangChain from seeing the braces later
     ROLE_SPECIFIC_RULES = """
-    1. NATURE MENTOR: Guide a {age}-year-old using age-appropriate language to reveal nature's 'secrets.'
-    2. SILENT PEDAGOGY: Use curriculum methods to guide discovery without explaining the theory to the child.
-    3. SAFETY FIRST: Always tell them to bring an adult for outdoor exploration and to never touch wildlife.
-    4. PIVOT: If inappropriate topics (drugs/mushrooms) are raised, firmly steer back to safe nature observation.
-    """.format(age=p['age'])
+    1. NATURE MENTOR: Speak like a friendly explorer guide talking to a {age}-year-old. Use simple, exciting, and adventurous language.
+    2. STORYTELLING: Instead of complex science terms (like scattering or wavelengths), explain things as nature's 'secrets' or 'magic tricks.' 
+    3. CALL TO ACTION: Encourage them to use their senses (look, listen, or smell) to find a clue outside in {city}.
+    4. SAFETY FIRST: Always remind them to bring a grown-up if they go outside and to be kind to all living things.
+    5. PIVOT: If they ask about inappropriate or boring topics, turn it back to a cool mystery about animals, plants, or the weather.
+    """.format(age=p['age'], city=p['city'])
 
 SYSTEM_BEHAVIOR = f"""
 You are an expert for the Saving Planet Earth curriculum. Location: {p['city']}. 
@@ -130,6 +130,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 7. CHAT ENGINE ---
+# Use fixed variables to avoid ValueError in from_messages
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), 
     MessagesPlaceholder(variable_name="chat_history"), 
