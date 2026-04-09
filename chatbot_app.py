@@ -52,10 +52,9 @@ retriever, llm_model = get_bot_chain(api_key)
 if not st.session_state.onboarded:
     st.markdown("<h1 style='text-align:center;'>Saving Planet Earth: Chatbot</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; font-size: 1.2em;'>Based on the book by Ann Lewin-Benham</p>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can understand how to help you explore</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; margin: 30px 0; font-weight: 500;'>Tell us a little bit more about yourself so we can help you explore.</p>", unsafe_allow_html=True)
     
     with st.container():
-        # MERGED DROPDOWN
         u_role = st.selectbox("I am a...", ["Student", "Parent/Teacher"], index=0)
         c1, c2 = st.columns(2)
         with c1: z_code = st.text_input("Zip Code", placeholder="e.g. 90210")
@@ -63,16 +62,19 @@ if not st.session_state.onboarded:
         
         if st.button("Start Exploring"):
             if z_code:
-                city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
-                st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
-                
-                if u_role == "Student":
-                    st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
-                else:
-                    st.session_state.suggestions = ["What is the core philosophy?", "How do I facilitate an inquiry?", "Explain the importance of documentation"]
-                
-                st.session_state.onboarded = True
-                st.rerun()
+                try:
+                    city_lookup = llm_model.invoke(f"What city and state is Zip Code {z_code}? Return ONLY 'City, State'.").content
+                    st.session_state.profile.update({"zip": z_code, "city": city_lookup, "role": u_role, "age": u_age})
+                    
+                    if u_role == "Student":
+                        st.session_state.suggestions = ["What are the secrets of the trees?", "How do I start exploring?", "Tell me a nature secret"]
+                    else:
+                        st.session_state.suggestions = ["What is the core philosophy?", "How do I facilitate an inquiry?", "Explain the importance of documentation"]
+                    
+                    st.session_state.onboarded = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Connection Error: {e}")
             else: st.warning("Zip Code required!")
     st.stop()
 
@@ -81,27 +83,28 @@ p = st.session_state.profile
 
 if p['role'] == 'Parent/Teacher':
     ROLE_SPECIFIC_RULES = """
-    1. PROFESSIONAL MENTOR: You are an expert in the 'Saving Planet Earth' curriculum pedagogy.
-    2. PEDAGOGY OVER RECREATION: Focus on <u>documentation</u>, <u>scaffolding</u>, and <u>representation</u>. 
-    3. NO SAFETY LECTURES: Never tell an adult to 'bring a parent' or 'stay safe.' 
-    4. SUBSTANCE OVER QUESTIONS: Provide concrete pedagogical strategies from the textbook.
-    5. CURRICULUM FOCUS: Discuss the 'subject of inquiry' and how to guide the child's analytic and collaborative behaviors.
+    1. PEDAGOGICAL COACH: Engage in natural conversation but steer the dialogue toward pedagogical strategies found in the curriculum.
+    2. THEORETICAL STEERING: Relate interests back to <u>progettazione</u> (intentional project work) or <u>emergent curriculum</u>.
+    3. FOCUS ON DOCUMENTATION: Emphasize 'visible listening'—capturing the child's words to understand their thinking.
+    4. NO SAFETY LECTURES: The user is an adult; focus on the 'mechanics of learning,' not safety warnings.
+    5. SUBSTANCE: Provide concrete ways to use <u>scaffolding</u> and <u>representation</u> to deepen the child's inquiry.
     """
 else:
     ROLE_SPECIFIC_RULES = """
-    1. SAFETY: Tell them to bring a parent/adult for outdoor activities.
-    2. NO TOUCHING: Remind them to observe from a distance.
-    3. AGE APPROPRIATE: No drugs or inappropriate content. Pivot to nature.
+    1. NATURE MENTOR: Guide a {p['age']}-year-old using age-appropriate language to reveal nature's 'secrets.'
+    2. SILENT PEDAGOGY: Use curriculum methods to guide discovery without explaining the theory to the child.
+    3. SAFETY FIRST: Always tell them to bring an adult for outdoor exploration and to never touch wildlife.
+    4. PIVOT: If inappropriate topics (drugs/mushrooms) are raised, firmly steer back to safe nature observation.
     """
 
 SYSTEM_BEHAVIOR = f"""
-You are an expert mentor for the Saving Planet Earth curriculum. Location: {p['city']}. 
-USER ROLE: {p['role']}. TARGET AGE: {p['age']}.
+You are an expert for the Saving Planet Earth curriculum. Location: {p['city']}. 
+USER ROLE: {p['role']}. TARGET AGE OF CHILD: {p['age']}.
 
 {ROLE_SPECIFIC_RULES}
 
 GENERAL RULES:
-6. NO THERAPY: Answer the user directly. Ask at most ONE targeted question to build context for a <u>subject of inquiry</u>.
+6. CONVERSATIONAL: Be helpful and direct. Ask ONE targeted question to help define a <u>subject of inquiry</u>.
 7. PUNCTUATION: Every response MUST end with a (.) OR a (?).
 8. CONCISE: 3-4 sentences maximum.
 """
@@ -126,16 +129,31 @@ with st.sidebar:
         st.rerun()
 
 # --- 7. CHAT ENGINE ---
-prompt_template = ChatPromptTemplate.from_messages([("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), MessagesPlaceholder(variable_name="chat_history"), ("human", "{input}")])
-rag_chain = ({"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)), "input": lambda x: x["input"], "chat_history": lambda x: x["chat_history"]} | prompt_template | llm_model | StrOutputParser())
+prompt_template = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_BEHAVIOR + "\n\nContext:\n{context}"), 
+    MessagesPlaceholder(variable_name="chat_history"), 
+    ("human", "{input}")
+])
 
-for m in st.session_state.messages: st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
+rag_chain = (
+    {"context": (lambda x: x["input"]) | retriever | (lambda docs: "\n\n".join(d.page_content for d in docs)), 
+     "input": lambda x: x["input"], 
+     "chat_history": lambda x: x["chat_history"]} 
+    | prompt_template 
+    | llm_model 
+    | StrOutputParser()
+)
+
+for m in st.session_state.messages: 
+    st.chat_message(m["role"]).markdown(m["content"], unsafe_allow_html=True)
+
 if not st.session_state.messages:
     if p['role'] == 'Student':
         intro = f"Hi! I'm your nature mentor in {p['city']}. I'm here to help you uncover the hidden secrets of the world outside your door."
     else:
         intro = f"Welcome. I am here to support you in mentoring a {p['age']}-year-old in {p['city']} using the Saving Planet Earth curriculum. We can explore how to foster a deeper connection to nature through observation and meaningful play."
-    st.chat_message("assistant").markdown(intro); st.session_state.messages.append({"role": "assistant", "content": intro})
+    st.chat_message("assistant").markdown(intro)
+    st.session_state.messages.append({"role": "assistant", "content": intro})
 
 query = st.session_state.get("user_query") or st.chat_input("Type here...")
 if query:
@@ -156,13 +174,13 @@ if query:
         
         underlined = re.findall(r'<u>(.*?)</u>', res)
         try:
-            suggest_prompt = f"""
+            suggest_prompt_text = f"""
             Generate exactly 3 short follow-up questions that the {p['role']} would ask the AI. 
             The questions MUST be from the user's perspective to the AI.
             STRICT: If role is Parent/Teacher, focus on pedagogical methods.
             Return ONLY JSON: {{"prompts": [], "vocab": {{}}}}
             """
-            u_res = llm_model.invoke([("system", suggest_prompt), ("human", res)])
+            u_res = llm_model.invoke([("system", suggest_prompt_text), ("human", res)])
             data = json.loads(u_res.content)
             st.session_state.suggestions = data.get("prompts", [])
             
