@@ -3,6 +3,9 @@ langchain
 langchain-openai
 langchain-chroma
 langchain-community
+langchain-text-splitters
 python-dotenv
-pypdf
 docx2txt
+pypdf
+chromadb==0.5.3
+protobuf==4.25.3
